@@ -25,9 +25,9 @@ sequenceDiagram
     participant Contact as Emergency contact (phone)
     participant ES as Emergency services (teammate)
 
-    Cam->>Atom: Uploaded fall video plays as a camera stream
-    Atom->>Atom: Vision screen flags a possible fall
-    Atom->>Atom: Nemotron confirms the fall and writes a structured verdict
+    Cam->>Atom: Uploaded fall video plays; a frame is sent every 0.5 s
+    Atom->>Atom: Nemotron analyses each frame and returns a structured verdict
+    Atom->>Atom: First fall frame: possible fall. Still down 2 s later: fall confirmed
     Atom->>Admin: Text alert: "Fall detected in the living room"
     Note over Admin: Left unanswered. Timeout shortened from 3 min for the demo
     Atom->>Contact: Automatic phone call
@@ -45,7 +45,7 @@ Every AI step runs on the ATOM through the local inference endpoint. No cloud LL
 
 | Step                  | What the model does                                                                                                   |
 | --------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| **Verify the fall**   | Looks at the frames around the flagged moment and decides whether it's a real fall (not someone sitting or lying on a sofa). Returns event, severity, confidence and a one-line summary. |
+| **Detect the fall**   | Analyses the video frame by frame and decides, for each frame, whether someone has fallen (not sitting, or lying on a sofa on purpose). Returns posture, on-the-floor, fall, confidence and a one-line description. |
 | **Explain**           | Turns the verdict into a short, calm spoken message for the emergency contact: what happened, where, and when.        |
 | **Guide**             | Gives step-by-step guidance on what to do now. The guidance is grounded in a fixed first-aid checklist for falls, so the model selects and phrases steps from the checklist rather than inventing medical advice. |
 | **Understand the reply** | Interprets the contact's answer to "Do you want me to call emergency services?" (yes / no / unclear → ask again).     |
@@ -69,7 +69,7 @@ Demo video: a staged or synthetic clip of an elderly person falling (no real hou
 
 ### 1. The dashboard (≈ 30 s)
 
-**On screen:** the Sentry dashboard showing the camera feed for the "living room", the event timeline (empty) and the workflow panel (idle).
+**On screen:** the Sentry dashboard. It shows the camera view for the "living room", the empty frame-by-frame timeline, the Nemotron analysis panel (idle) and **Nemotron ready** in the header.
 
 **Say:** *"This is Sentry. It connects to the CCTV cameras a family already has. Everything you're about to see is analysed on this ATOM, and no video leaves the house."*
 
@@ -82,23 +82,24 @@ Demo video: a staged or synthetic clip of an elderly person falling (no real hou
 ### 3. The fall is detected (≈ 30 s)
 
 **On screen:**
-- the person in the clip falls,
-- the camera view highlights the person and shows **"Possible fall"**,
-- the workflow panel shows **Nemotron verifying…**, then the verdict:
+- before the fall, the timeline fills with green bars, one per analysed frame, and the Nemotron panel shows "standing";
+- the person in the clip falls, and the camera view shows an amber banner: **POSSIBLE FALL · CONFIRMING WITH NEMOTRON**;
+- a couple of seconds later, the banner turns red with **FALL DETECTED**, the alert card appears with a snapshot, and the Nemotron panel shows the verdict:
 
 ```json
 {
-  "event": "fall",
-  "severity": "high",
+  "person_visible": true,
+  "posture": "lying",
+  "on_floor": true,
+  "fall_detected": true,
   "confidence": 0.91,
-  "location": "living room",
-  "summary": "Elderly person fell beside the sofa and is not getting up."
+  "description": "Elderly person fell beside the sofa and is not getting up."
 }
 ```
 
 - the admin's phone receives the Telegram text alert. Nobody answers it.
 
-**Say:** *"A fast vision model flagged a possible fall, and Nemotron confirmed it's real, not someone lying down on purpose. The admin gets a text alert, but in real life they might be in a meeting. Normally Sentry waits 3 minutes; for the demo we've shortened that."*
+**Say:** *"Nemotron is analysing the video frame by frame, right here on the ATOM. One frame could be wrong, so Sentry waits until Nemotron still sees her on the floor two seconds later, and only then confirms the fall. The admin gets a text alert, but in real life they might be in a meeting. Normally Sentry waits 3 minutes; for the demo we've shortened that."*
 
 ### 4. Sentry calls the emergency contact (≈ 1 min 30 s)
 
@@ -145,7 +146,7 @@ If the contact answers **"No"**, Sentry doesn't make the second call. It logs th
 | Runs on the ATOM                                         | Leaves the house                                      |
 | -------------------------------------------------------- | ----------------------------------------------------- |
 | Video decoding and frame sampling                        | Telegram text alert to the admin (no images)          |
-| Vision screening and Nemotron fall verification          | Voice calls to the emergency contact and "emergency services" (spoken text only) |
+| Frame-by-frame fall detection with Nemotron              | Voice calls to the emergency contact and "emergency services" (spoken text only) |
 | Generating the call script, guidance and reply understanding | Nothing else. No video, clips or snapshots           |
 | Event log and dashboard                                  |                                                       |
 

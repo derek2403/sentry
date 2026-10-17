@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #0a0e13;
+  --panel: #11161d;
+  --panel-2: #171e27;
+  --border: #233042;
+  --text: #e6edf3;
+  --muted: #8a97a8;
+  --accent: #76b900;
+  --ok: #22c55e;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+@keyframes alert-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(239 68 68 / 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgb(239 68 68 / 0);
+  }
+}
+
+.alert-pulse {
+  animation: alert-pulse 1.6s ease-in-out infinite;
+}

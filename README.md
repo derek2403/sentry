@@ -4,7 +4,7 @@
 
 > Built for the **ACE 2026 · DGX Spark Mini Hackathon** — *Local AI, Real Problems*.
 >
-> **Status:** in active development during the hackathon. This README describes the target design. See [Roadmap](#roadmap) for what is built so far.
+> **Status:** in active development during the hackathon. The dashboard and frame-by-frame fall detection are built. The Telegram alert and emergency call are next. See [Roadmap](#roadmap).
 
 ---
 
@@ -73,55 +73,52 @@ Sentry only calls public emergency services (999) when the emergency contact con
 
 ## How it works
 
-Sentry is a **multi-model pipeline**, not a chatbot. Cheap, fast vision models screen every sampled frame. A local vision-language model (VLM) is called only when something looks wrong, to confirm the event, judge how severe it is and explain it.
+Sentry is a **vision-language pipeline**, not a chatbot. It analyses the camera feed frame by frame with **NVIDIA Nemotron** running on the ATOM. Nemotron describes each frame and judges whether someone has fallen. Sentry's fall logic only confirms a fall when several frames over a few seconds agree, then starts the emergency workflow.
 
 ```mermaid
 flowchart LR
-    CAM["Existing cameras<br/>RTSP / IP / USB"] --> SAMPLE
+    CAM["Dashboard<br/>camera or uploaded video"] -->|"one JPEG frame<br/>every 0.5 s"| API
 
     subgraph ATOM["GIGABYTE AI TOP ATOM · on-premises"]
-        SAMPLE["Frame sampler<br/>motion gating"] --> FAST["Fast vision models<br/>person · pose · fire/smoke"]
-        FAST -->|candidate event| VLM["Local VLM<br/>scene reasoning + severity"]
-        CTX[("Home profile")] -.-> VLM
-        VLM -->|structured verdict| MGR["Alert manager<br/>dedupe · cooldown · 3-min timer"]
-        MGR --> LOG[("Event log")]
+        API["Sentry server<br/>Next.js API routes"] -->|"frame + previous verdict"| NEM["Nemotron VLM<br/>local vLLM"]
+        NEM -->|"JSON verdict"| FALL["Fall logic<br/>confirm across frames"]
+        FALL --> LOG[("Backlog<br/>event log + snapshots")]
+        FALL -->|"fall confirmed"| WF["Emergency workflow"]
     end
 
-    MGR -->|text alert only| TG["Telegram bot"]
-    TG -->|OK / call now| MGR
-    MGR -->|no response in 3 min| CALL["Emergency call<br/>to emergency contact"]
+    WF -->|text alert only| TG["Telegram bot"]
+    TG -->|OK / call now| WF
+    WF -->|no response in 3 min| CALL["Emergency call<br/>to emergency contact"]
 ```
 
-1. **Capture.** Frames are pulled from each camera stream and sampled at a low rate (about 1 fps). Motion gating skips frames where nothing has changed.
-2. **Screen.** Lightweight computer-vision models run on each sampled frame: person detection and pose estimation for falls, plus fire/smoke detection. They are chosen to be light enough to cover several cameras at once.
-3. **Reason.** When a screen fires, the frames around it go to the local VLM on the ATOM, along with a short **home profile** (for example, *"Grandma uses a walker and naps on the living-room sofa after lunch"*). The VLM answers the questions a detector can't, such as:
-   - *"Is this person lying on the floor or on a bed?"*
-   - *"Is this a fire or the stove's normal flame?"*
-   - *"Is the child near the open window?"*
-
-   It can ask for a few more seconds of footage before it decides. It returns a structured verdict:
+1. **Sample.** The dashboard plays the camera feed or an uploaded video and grabs a frame every 0.5 s of video. Frames are sent one at a time: the next frame goes only after Nemotron has answered, so the model is never flooded.
+2. **Understand.** Each frame goes to Nemotron on the ATOM with a short instruction, plus the previous frame's verdict for context. Nemotron answers questions a simple motion or object detector can't, such as *"Is this person on the floor, or on a bed or sofa?"* and *"Did they fall, or are they lying down on purpose?"* Guided decoding makes it return a structured verdict:
 
    ```json
    {
-     "event": "fall",
-     "severity": "high",
+     "person_visible": true,
+     "posture": "lying",
+     "on_floor": true,
+     "fall_detected": true,
      "confidence": 0.91,
-     "location": "living room",
-     "summary": "Elderly person on the floor beside the sofa, not moving."
+     "description": "Elderly person lying on the floor beside the sofa."
    }
    ```
 
-4. **Act.** The alert manager removes duplicate alerts, applies a cooldown, sends the Telegram alert, and starts a 3-minute timer. If the admin doesn't respond in time, it places an automatic call to the emergency contact. Rejected candidates are logged too, which lets us measure false alarms.
+3. **Confirm.** A single frame can be wrong, so Sentry confirms a fall only when:
+   - at least 2 frames, at least 2 s apart, show a fall;
+   - and no clear "sitting up" or "standing" frame comes in between.
 
-**Why two stages?** Running a VLM on every frame from every camera, 24/7, would waste compute and add latency. A VLM is also much better than a detector at telling a real emergency from an everyday look-alike, like someone lying on the sofa or bending to pick something up. Screening first and reasoning second keeps Sentry fast and cuts down false alarms.
+   If the video ends right after a fall, Sentry keeps checking the frozen last frame for a few seconds so the fall can still be confirmed.
+4. **Act.** A confirmed fall raises a **FALL DETECTED** alert on the dashboard with a snapshot, adds an entry to the Backlog and starts the emergency workflow (Telegram alert → 3-minute timer → emergency call). Every frame's verdict is logged too, so false alarms are easy to spot.
 
 ## Why it has to run locally
 
 The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it would not:
 
 - **Privacy by design.** Home cameras capture the most private spaces people have: bedrooms, children, elderly parents in vulnerable moments. With Sentry, video is analysed only on the ATOM and is never uploaded. No live footage, clips or snapshots are sent anywhere. The only things that leave the house are a short text alert to the admin's Telegram chat, such as *"Fall detected in the living room"*, and, if nobody responds, a spoken version of the same message on the emergency call. Cloud cameras upload footage around the clock, so this cuts what reaches third parties to a minimum, in line with the data-minimisation principle of Malaysia's PDPA 2010.
-- **Continuous analysis is only affordable locally.** Four cameras at 1 fps produce **345,600 frames a day**. Even after gating, sending candidates to a cloud VLM would cost money per call and use upstream bandwidth all the time. On the ATOM, the running cost is effectively the electricity.
-- **Why the ATOM, not a Pi or a laptop.** The ATOM has 128 GB of unified memory. That's enough to keep the VLM, the detection and pose models, and several camera streams loaded at the same time. A small edge device can run a detector but not a capable VLM. A laptop can't stay on 24/7 as a home appliance.
+- **Continuous analysis is only affordable locally.** Four cameras analysed at 2 frames a second produce **691,200 frames a day**. Sending each one to a cloud VLM would cost money per call and use upstream bandwidth all the time. On the ATOM, the running cost is effectively the electricity.
+- **Why the ATOM, not a Pi or a laptop.** The ATOM has 128 GB of unified memory, enough to run a capable vision-language model like Nemotron locally and analyse frames continuously. A small edge device can't run a VLM, and a laptop can't stay on 24/7 as a home appliance.
 - **Latency.** Inference happens on the same LAN as the cameras, with no upload round-trip.
 - **Uses the cameras people already own.** There are no new cameras to buy and no cloud subscription. One local AI box serves the whole home.
 
@@ -131,85 +128,115 @@ The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it 
 
 | Layer             | Choice                                                                      |
 | ----------------- | --------------------------------------------------------------------------- |
-| Hardware          | GIGABYTE AI TOP ATOM (NVIDIA DGX Spark platform, ARM64)                     |
-| LLM / VLM serving | vLLM: the OpenAI-compatible endpoint already configured on the ATOM          |
-| Computer vision   | OpenCV for stream capture, plus lightweight person/pose and fire/smoke models |
-| Alerting          | Telegram Bot API (long polling, so no public webhook is needed)             |
-| Emergency calls   | Voice-call API (e.g. Twilio) with a text-to-speech message                  |
-| Language          | Python                                                                      |
+| Hardware              | GIGABYTE AI TOP ATOM (NVIDIA DGX Spark platform, ARM64)                          |
+| Vision-language model | NVIDIA Nemotron, served by the vLLM endpoint already configured on the ATOM (OpenAI-compatible) |
+| App                   | Next.js 16 (App Router), TypeScript, Tailwind CSS: dashboard and API routes      |
+| Frame capture         | In the dashboard: `<video>` + canvas, for an uploaded video or a webcam          |
+| Storage               | Local event log (JSON lines) and fall snapshots in `data/` on the ATOM           |
+| Alerting *(next)*     | Telegram Bot API (long polling, so no public webhook is needed)                  |
+| Emergency calls *(next)* | Voice-call API (e.g. Twilio) with a text-to-speech message                    |
 
 > **Model notes**
-> - The workshop's baseline model is NVIDIA Nemotron 3.5 Lightning. The exact served model ID, and whether it accepts **image input**, is still to be confirmed with the organisers. Check `/v1/models` (below) and set `LLM_MODEL` in `.env`.
-> - If the served model is text-only, the Reason step falls back to sending the detector outputs as structured text: labels, boxes, pose keypoints and timings. We will not start a second inference service to get a VLM without organiser approval.
-> - Computer-vision model weights are used only after organiser approval. They are stored under `models/` so nothing downloads at runtime.
+> - Frame-by-frame analysis needs a model that accepts **image input**. On the ACE 2026 ATOM that is **Nemotron 3 Nano Omni** (`omni`, port 9001). The briefing's baseline, Nemotron 3.5 Lightning (`lightning`, port 9000), and Nemotron 3 Nano (`nano`, port 9006) are text-only and reject images. Set `LLM_BASE_URL` and `LLM_MODEL=omni` in `.env.local`.
+> - Measured on our ATOM: about 1.1–1.6 s per frame once warm. The first request after idle can take about 20 s, so send one warm-up frame before the demo.
+> - Sentry only uses the existing endpoint and never starts a second inference service.
+> - For reasoning-capable Nemotron models, Sentry asks the model to answer without thinking (`LLM_DISABLE_THINKING=true`) to keep each frame fast.
 
 ## Getting started
 
-> Setup and run steps describe the target layout. They will work once the corresponding files are committed (see [Roadmap](#roadmap)).
->
-> Run Sentry on your team's assigned ATOM, using the inference service that is already running there. Do not start a second vLLM process or download extra models without approval from the organisers.
+> Run Sentry on your team's assigned ATOM, using the inference service that is already running there. Don't start a second vLLM process or download extra models without approval from the organisers.
 
 ### Prerequisites
 
 - Access to your team's assigned ATOM, via NVIDIA Sync → Terminal / VS Code
-- Python 3.10+
-- A Telegram bot token from [@BotFather](https://t.me/BotFather). Every recipient must send the bot a message first; then read each `chat.id` from `https://api.telegram.org/bot<token>/getUpdates`.
-- At least one camera source: an RTSP URL, a USB webcam, or a recorded video file for demos
-
-The ATOM is ARM64, so install aarch64-compatible builds of any CV libraries. The vLLM service already uses most of the shared GPU memory, so keep CV models small and check headroom with `nvidia-smi` first.
+- Node.js 20.9 or newer
+- A staged or synthetic video clip of a fall for the demo (see [demo.md](demo.md))
 
 ### Setup
 
 ```bash
 git clone <this-repo-url> sentry
 cd sentry
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # then fill in the values below
+npm install
+cp .env.example .env.local   # then adjust the values (see the comments in the file)
 ```
 
-### Configuration (`.env`)
+The most important settings in `.env.local`:
 
-```dotenv
-# Local inference endpoint on the ATOM (OpenAI-compatible)
-LLM_BASE_URL=http://localhost:8000/v1
-LLM_MODEL=<served-model-id>
-LLM_API_KEY=                     # leave blank if the endpoint has no key
+| Variable | Default | What it does |
+| -------- | ------- | ------------ |
+| `LLM_BASE_URL` | `http://localhost:8000/v1` | The ATOM's local inference endpoint |
+| `LLM_MODEL` | first served model | Nemotron model ID |
+| `ANALYSIS_INTERVAL_S` | `0.5` | Seconds of video between analysed frames |
+| `FALL_CONFIRM_FRAMES` / `FALL_CONFIRM_SECONDS` | `2` / `2` | How many fall frames, over how long, confirm a fall |
+| `FALL_MIN_CONFIDENCE` | `0.5` | Ignore fall verdicts below this confidence |
+| `HOLD_LAST_FRAME_S` | `8` | After a video ends, keep checking its last frame this long |
 
-# Telegram
-TELEGRAM_BOT_TOKEN=<your-bot-token>
-TELEGRAM_CHAT_ID=<admin-chat-id>
-
-# Automatic emergency call
-ACK_TIMEOUT_SECONDS=180                       # call the emergency contact if the admin doesn't respond within 3 minutes
-EMERGENCY_CONTACT_PHONE=<+60XXXXXXXXX>
-VOICE_API_SID=<voice-provider-account-id>
-VOICE_API_TOKEN=<voice-provider-token>
-VOICE_FROM_NUMBER=<caller-id-number>
-
-# Cameras: comma-separated "name=source" pairs (RTSP URL, device index, or video file).
-# RTSP URLs often contain the camera's username/password, so keep them only in .env.
-CAMERAS=living_room=rtsp://<camera-ip>/stream,kitchen=0,demo=samples/fall_demo.mp4
-
-# Local data retention for the event log on the ATOM
-RETENTION_DAYS=7
-```
-
-Never commit `.env`, event logs or recordings. Add them to `.gitignore`.
+Never commit `.env.local` or `data/` (event log and snapshots). Both are already in `.gitignore`.
 
 ### Verify the local model
 
 ```bash
-nvidia-smi                                                   # GPU is visible
-curl -s http://localhost:8000/v1/models | python3 -m json.tool   # endpoint is up; note the model "id"
+nvidia-smi                                                  # GPU is visible
+curl -s http://localhost:8000/v1/models | python3 -m json.tool  # endpoint is up; note the model "id"
 ```
 
-Use the host and port the organisers gave you if they differ from vLLM's default `localhost:8000`. If the endpoint requires a key, add `-H "Authorization: Bearer <key>"`.
+Use the host and port the organisers gave you if they differ from vLLM's default `localhost:8000`. If the endpoint requires a key, set `LLM_API_KEY` and add `-H "Authorization: Bearer <key>"` to the curl command.
 
 ### Run
 
 ```bash
-python3 -m sentry
+npm run build && npm start      # or `npm run dev` while developing
+```
+
+Open **http://localhost:3000**. When you connect through NVIDIA Sync / VS Code, forward port 3000 to your laptop and open it on `localhost`. The browser only allows the **Use camera** button on `localhost` or HTTPS. The header shows **Nemotron ready** once the endpoint answers.
+
+Restart the server after changing `.env.local` or anything in `lib/server/`.
+
+### Running the app on a laptop against the ATOM's model
+
+Node.js isn't installed on the ATOM, so you can run Sentry on your laptop and forward the model port over SSH. Inference still runs on the ATOM:
+
+```bash
+ssh -N -L 9001:127.0.0.1:9001 DGX-Spark   # the SSH alias NVIDIA Sync creates; keep it running
+npm run dev                               # .env.local: LLM_BASE_URL=http://localhost:9001/v1, LLM_MODEL=omni
+```
+
+Two synthetic test clips are in `samples/`:
+- `fall.mp4`: an elderly person falls and stays on the floor. It should raise an alert.
+- `sofa.mp4`: a person lies down on the sofa on purpose. It should not.
+
+### Working without the ATOM
+
+```bash
+npm run mock                                                   # fake endpoint on :8000
+LLM_BASE_URL=http://localhost:8000/v1 npm run dev
+```
+
+The mock ignores the image: it answers "standing" for the first few frames of each video, then "fallen". Use it only to work on the dashboard, never for the real demo.
+
+### Tests and checks
+
+```bash
+npm test          # fall logic and verdict parsing
+npm run lint
+npm run typecheck
+```
+
+### Project layout
+
+```text
+app/                    Next.js App Router: the dashboard page and the API routes
+  api/sessions/         start/stop an analysis session; POST each frame to …/[id]/frames
+  api/logs/             Backlog entries
+  api/status/           model health, settings and the active alert
+components/             Dashboard UI (camera view, Nemotron panel, Backlog drawer)
+lib/client/             useFrameAnalyzer: samples frames from the video and sends them
+lib/server/nemotron.ts  calls Nemotron on the local vLLM endpoint
+lib/server/fall.ts      turns per-frame verdicts into fall events
+lib/server/workflow.ts  emergency workflow hook (Telegram + call go here)
+scripts/mock-nemotron.mjs  fake endpoint for development
+tests/                  unit tests (vitest)
 ```
 
 ## Demo
@@ -238,7 +265,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 
 | Criterion                | Weight | Where to look                                                                                       |
 | ------------------------ | :----: | --------------------------------------------------------------------------------------------------- |
-| AI capability            | 25%    | [How it works](#how-it-works): CV screening → VLM reasoning with home context → Telegram alert → automatic emergency call |
+| AI capability            | 25%    | [How it works](#how-it-works): frame-by-frame Nemotron VLM analysis → multi-frame fall confirmation → Telegram alert → automatic emergency call |
 | Local AI on the ATOM     | 25%    | [Why it has to run locally](#why-it-has-to-run-locally); [demo.md](demo.md) step 6                    |
 | Impact & feasibility     | 20%    | [The problem](#the-problem): reuses existing cameras, no subscription, privacy-preserving           |
 | Technical implementation | 15%    | [Demo](#demo) and [Results](#results)                                                               |
@@ -246,16 +273,16 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 
 ## Roadmap
 
-- [ ] Camera ingestion and frame sampling
-- [ ] Fall detection (person + pose) and fire/smoke screening
-- [ ] VLM verification with structured verdicts and home profile
+- [x] Dashboard with camera view, video upload and Backlog
+- [x] Frame-by-frame fall detection with Nemotron and structured verdicts
+- [x] Fall confirmation across frames, with every verdict and false alarm logged
 - [ ] Text-only Telegram alerts with action buttons
 - [ ] Acknowledgement tracking with a 3-minute timeout
 - [ ] Automatic emergency call to the emergency contact
 - [ ] Voice agent on the call: explain, guide from the first-aid checklist, offer to call emergency services
-- [ ] Dashboard with camera view and video upload for demos
-- [ ] Event log with rejected candidates
-- [ ] Water leak and child-safety scenarios
+- [ ] RTSP / IP camera ingestion on the ATOM (today: uploaded video or browser webcam)
+- [ ] Home profile in the prompt (for example, "Grandma naps on the sofa after lunch")
+- [ ] Fire/smoke, water leak and child-safety scenarios
 - [ ] Local alarm when the internet is down
 - [ ] Local event-log dashboard (LAN-only, password-protected)
 - [ ] Audio cues (calls for help, smoke alarms) via local speech-to-text
@@ -266,7 +293,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 - Sentry **supports** human caregivers. It is **not** a certified safety or medical device, and it does not replace smoke detectors, emergency services or professional care.
 - Like any vision system, it can miss events (poor lighting, the person outside the camera's view) and can raise false alarms. Alerts describe what Sentry saw, so the admin can check in (for example by calling home or opening their existing CCTV app) and make the final call.
 - **Consent.** Get consent from the adults being monitored, including elderly parents, and respect their right to refuse. Tell carers, domestic helpers and regular visitors. Don't put cameras in bathrooms.
-- **Data handling.** Sentry does not record continuously, and no footage or images are sent off the ATOM. Only event verdicts are kept in the local event log, and they are deleted after `RETENTION_DAYS`. Text alerts already delivered to Telegram must be deleted there separately.
+- **Data handling.** Sentry does not record continuously, and no footage or images are sent off the ATOM. Only frame verdicts and a snapshot of each confirmed fall are kept, locally in `data/` on the ATOM. Delete that folder to clear them (automatic retention is on the roadmap). Text alerts already delivered to Telegram must be deleted there separately.
 - **Emergency contact.** The emergency contact must agree to receive automatic calls. Keep their number up to date, because Sentry relies on it when the admin doesn't respond.
 - **Access control.** The bot sends alerts to, and accepts button presses from, an allow-list of chat IDs only. Use a private chat, or a small group with only the people who should see these alerts.
 
