@@ -33,30 +33,46 @@ export class HttpError extends Error {
   }
 }
 
-/** All server-side state: one instance per server process. */
-class Sentry {
-  readonly log = new EventLog(config.dataDir);
-  readonly snapshotDir = path.join(config.dataDir, "snapshots");
-  private sessions = new Map<string, Session>();
-  private alert: Alert | null = null;
+/** Server-side data, shared by every route handler for the life of the server process. */
+interface SentryState {
+  log: EventLog;
+  sessions: Map<string, Session>;
+  alert: Alert | null;
+  alertSession: string | null; // the session that raised the active alert
+}
 
-  constructor() {
-    fs.mkdirSync(this.snapshotDir, { recursive: true });
-    this.log.add({ kind: "system", message: "Sentry server started" });
+const SNAPSHOT_DIR = path.join(config.dataDir, "snapshots");
+
+function createState(): SentryState {
+  fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+  const log = new EventLog(config.dataDir);
+  log.add({ kind: "system", message: "Sentry server started" });
+  return { log, sessions: new Map(), alert: null, alertSession: null };
+}
+
+/** The server's logic, over the shared state. */
+class Sentry {
+  readonly snapshotDir = SNAPSHOT_DIR;
+
+  constructor(private readonly s: SentryState) {}
+
+  get log(): EventLog {
+    return this.s.log;
   }
 
   currentAlert(): Alert | null {
-    return this.alert;
+    return this.s.alert;
   }
 
   activeSessions(): number {
-    return this.sessions.size;
+    return this.s.sessions.size;
   }
 
   acknowledgeAlert(): Alert | null {
-    const alert = this.alert;
+    const alert = this.s.alert;
     if (alert) {
-      this.alert = null;
+      this.s.alert = null;
+      this.s.alertSession = null;
       this.log.add({ kind: "alert", source: alert.location, camera: alert.camera, message: "Alert marked OK on the dashboard" });
     }
     return alert;
@@ -78,16 +94,16 @@ class Sentry {
       ended: false,
       lastSeen: Date.now(),
     };
-    this.sessions.set(session.id, session);
+    this.s.sessions.set(session.id, session);
     this.log.add({ kind: "video", source: name, camera, message: `Started watching ${name}` });
     return { id: session.id, source, name, camera };
   }
 
   endSession(id: string, reason: string): void {
-    const session = this.sessions.get(id);
+    const session = this.s.sessions.get(id);
     if (!session) return;
     session.ended = true; // a frame still waiting on Nemotron must not raise alerts afterwards
-    this.sessions.delete(id);
+    this.s.sessions.delete(id);
     this.log.add({
       kind: "video",
       source: session.name,
@@ -97,7 +113,7 @@ class Sentry {
   }
 
   async analyse(id: string, imageDataUrl: string, t: number): Promise<FrameResult> {
-    const session = this.sessions.get(id);
+    const session = this.s.sessions.get(id);
     if (!session) throw new HttpError(404, "Unknown or expired session");
     if (session.busy) throw new HttpError(409, "Previous frame is still being analysed");
     session.busy = true;
@@ -118,10 +134,10 @@ class Sentry {
           this.log.add({ kind: "error", level: "error", source, camera, message: `Nemotron analysis failed: ${message}` });
           session.failing = true;
         }
-        return { verdict: null, state: session.detector.state, events: [], latencyMs: Math.round(performance.now() - started), error: message, alert: this.alert };
+        return { verdict: null, state: session.detector.state, events: [], latencyMs: Math.round(performance.now() - started), error: message, alert: this.s.alert };
       }
       if (session.ended) {
-        return { verdict, state: session.detector.state, events: [], latencyMs: Math.round(performance.now() - started), alert: this.alert };
+        return { verdict, state: session.detector.state, events: [], latencyMs: Math.round(performance.now() - started), alert: this.s.alert };
       }
       if (session.failing) {
         session.failing = false;
@@ -145,11 +161,11 @@ class Sentry {
         } else if (event.kind === "recovered") {
           this.log.add({ kind: event.kind, source, camera, data, message: `Recovered: ${detail}.` });
         } else if (event.kind === "fall_confirmed") {
-          this.raiseAlert(source, camera, t, detail, imageDataUrl);
+          this.raiseAlert(session.id, source, camera, t, detail, imageDataUrl);
         }
       }
 
-      return { verdict, state, events, latencyMs, alert: this.alert };
+      return { verdict, state, events, latencyMs, alert: this.s.alert };
     } finally {
       session.busy = false;
     }
@@ -188,9 +204,10 @@ class Sentry {
     });
   }
 
-  private raiseAlert(source: string, camera: string | null, t: number, detail: string, imageDataUrl: string): void {
-    if (this.alert && this.alert.camera === camera) {
-      // Same camera is already in alert and nobody has marked it OK: don't alert (or call) again.
+  private raiseAlert(sessionId: string, source: string, camera: string | null, t: number, detail: string, imageDataUrl: string): void {
+    if (this.s.alert && this.s.alert.camera === camera && this.s.alertSession === sessionId) {
+      // Same person, same feed, nobody has marked it OK yet: don't alert (or call) again.
+      // A new playback or camera session is a new incident and does alert again.
       this.log.add({ kind: "fall_confirmed", level: "warning", source, camera, data: { t }, message: `Still down: ${detail}. Alert already active.` });
       return;
     }
@@ -205,9 +222,10 @@ class Sentry {
       message: `FALL DETECTED in ${source}: ${detail}`,
     });
     const alert: Alert = { eventId: entry.id, ts: entry.ts, location: source, camera, message: entry.message, snapshot, videoTime: t };
-    this.alert = alert;
+    this.s.alert = alert;
+    this.s.alertSession = sessionId;
     // Don't hold up the frame response while the workflow runs.
-    onFallConfirmed(alert, this.log, () => this.alert?.eventId === alert.eventId).catch((err) => {
+    onFallConfirmed(alert, this.log, () => this.s.alert?.eventId === alert.eventId).catch((err) => {
       this.log.add({ kind: "error", level: "error", source, camera, message: `Emergency workflow failed: ${err instanceof Error ? err.message : String(err)}` });
     });
   }
@@ -227,19 +245,19 @@ class Sentry {
 
   private pruneIdle(): void {
     const now = Date.now();
-    for (const [id, session] of this.sessions) {
+    for (const [id, session] of this.s.sessions) {
       if (now - session.lastSeen > SESSION_IDLE_MS) this.endSession(id, "idle timeout");
     }
   }
 }
 
-// One instance per server process. It lives on globalThis because Next.js bundles each
-// route handler separately (each with its own copy of this module) and `next dev` reloads
-// modules on edit; both would otherwise create separate instances with separate sessions.
-// After editing lib/server/* or .env.local, restart the server to pick up the changes.
-const globalForSentry = globalThis as unknown as { __sentry?: Sentry };
+// The state lives on globalThis because Next.js bundles each route handler separately (each
+// with its own copy of this module) and `next dev` reloads modules on edit; both would
+// otherwise give separate sessions and alerts. Only data is kept there: the logic always comes
+// from the current module, so code changes take effect in `next dev` without a restart.
+const globalForSentry = globalThis as unknown as { __sentryState?: SentryState };
 
 export function sentry(): Sentry {
-  globalForSentry.__sentry ??= new Sentry();
-  return globalForSentry.__sentry;
+  globalForSentry.__sentryState ??= createState();
+  return new Sentry(globalForSentry.__sentryState);
 }
