@@ -1,6 +1,6 @@
 # Sentry: Pitch Deck
 
-**Sentry, a private AI that watches over your home.**
+**Sentry: a local AI agent that turns your existing cameras into an emergency responder.**
 
 - **Deck:** https://claude.ai/artifact/1wVjmkYyXQvGjAMqa2aGYn
 - The deck is private until it is shared from its Share menu. Export it as PDF or PPTX from the same menu.
@@ -10,13 +10,13 @@
 
 | # | Slide | What it covers |
 | - | ----- | -------------- |
-| 1 | Sentry | Cover: "a private AI that watches over your home" |
+| 1 | Sentry | Cover: "a local AI agent that turns your existing cameras into an emergency responder" |
 | 2-4 | Three camera clips | An elderly fall, a chest of drawers tipping onto a toddler, a dog stuck on its leash. Full-screen video, no captions. |
 | 5 | Who's watching the cameras? | CCTV records, but nobody watches it 24/7 |
 | 6 | Sentry is / where / and | What Sentry is, in three lines |
-| 7 | A text first. Then a phone call. | Telegram alert, then an automatic call with first-aid steps, then 999 only if the contact says yes |
-| 8 | How a frame becomes a phone call. | Architecture on the ATOM: sampler, vision models, Nemotron, alert manager |
-| 9 | Five jobs for Nemotron, all on the ATOM. | Verify, explain, guide, understand the reply, brief emergency services |
+| 7 | No text to miss. Sentry calls. | A fall is urgent, so Sentry calls the emergency contact at once with first-aid steps, then calls 999 only if the contact says yes |
+| 8 | How a frame becomes a phone call. | Detect, verify, escalate on the ATOM: a frame every 0.5 s, Nemotron 3 Nano Omni, a multi-frame check, then the call |
+| 9 | Five jobs for Nemotron, all on the ATOM. | Detect, explain, guide, understand the reply, brief emergency services |
 | 10 | Demo. | Live demo, see [demo.md](demo.md) |
 
 ## Appendix
@@ -29,7 +29,7 @@
 | 14 | Your home, on someone else's server (Ring, Wyze) |
 | 15 | Who are Ring and Wyze? |
 | 16 | What Sentry looks for |
-| 17 | 345,600 frames a day, 0 uploaded |
+| 17 | 691,200 frames a day, 0 uploaded |
 | 18 | Why it has to run on the ATOM |
 | 19 | Roadmap |
 | 20 | Where each judging criterion lives |
