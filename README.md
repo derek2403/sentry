@@ -46,23 +46,30 @@ moved for about 20 seconds.
 
 ### Automatic emergency call
 
-If the admin doesn't reply or tap a button **within 3 minutes**, Sentry assumes nobody has seen the alert and **automatically phones the emergency contact**. The emergency contact is a person the household chose, such as a family member or neighbour. On the call, a text-to-speech voice reads out what happened, where, and when.
+If the admin doesn't reply or tap a button **within 3 minutes**, Sentry assumes nobody has seen the alert and **automatically phones the emergency contact**. The emergency contact is a person the household chose, such as a family member or neighbour. On the call, Sentry's voice agent (Nemotron, running on the ATOM):
+
+1. **explains what happened**: what was detected, where, and when;
+2. **tells the contact what to do right now**, using a fixed first-aid checklist so it doesn't invent medical advice;
+3. **asks: "Do you want me to call emergency services?"** If the contact says yes (or presses 1), Sentry calls emergency services and reads out an incident summary.
 
 ```mermaid
 flowchart LR
     A["Emergency confirmed"] --> B["Telegram text alert<br/>to admin"]
     B --> C{"Admin responds<br/>within 3 min?"}
     C -->|"They're OK"| D["Close event<br/>logged as resolved"]
-    C -->|"Call emergency contact"| E["Emergency call<br/>to emergency contact"]
+    C -->|"Call emergency contact"| E["Call emergency contact<br/>explain + guide"]
     C -->|"No response"| E
-    E --> F["Admin notified that<br/>the call was made"]
+    E --> G{"Call emergency<br/>services?"}
+    G -->|"Yes"| H["Call emergency services<br/>with incident summary"]
+    G -->|"No"| F["Admin updated<br/>on Telegram"]
+    H --> F
 ```
 
 - **They're OK**: the event is closed and no call is made.
 - **Call emergency contact**: the call is placed straight away, without waiting the 3 minutes.
 - **No response within 3 minutes**: the call is placed automatically. The admin is then told on Telegram that the emergency contact was called.
 
-Sentry calls the household's chosen emergency contact. It does **not** dial public emergency services (999) itself.
+Sentry only calls public emergency services (999) when the emergency contact confirms it on the call. It never does so on its own.
 
 ## How it works
 
@@ -207,16 +214,13 @@ python3 -m sentry
 
 ## Demo
 
-Our 5-minute demo runs the complete workflow end to end on the ATOM:
+Our 5-minute demo shows an elderly fall handled end to end on the ATOM. **See [demo.md](demo.md) for the full script.**
 
-1. Sentry watches a staged scene, either from a live camera or a recorded clip.
-2. **True alarm:** a team member acts out a fall. The fast models flag it, the local VLM confirms it, and a text alert describing the fall arrives on the admin's phone through Telegram.
-3. **False alarm caught:** a team member lies down on a couch or bends to pick something up. The detector flags it, the VLM rejects it, and no alert is sent. The rejected verdict appears in the event log.
-4. **Fire:** a synthetic or approved stock clip is played as a camera source. We don't stage real fires.
-5. **No response:** we leave the alert unanswered. After the timeout (shortened from 3 minutes for the demo), Sentry automatically calls a team member's phone, acting as the emergency contact, and reads out the alert.
-6. Throughout, `nvidia-smi` and the vLLM request log on the ATOM are on screen, to prove inference is local.
+1. The Sentry dashboard shows the home's camera feed.
+2. We upload a video of an elderly person falling, which plays as a camera source.
+3. Nemotron confirms the fall. Sentry calls the emergency contact, explains what happened and what to do, then asks whether to call emergency services.
 
-All demo footage is staged by the team or synthetic. Any third-party clips are used only with organiser approval and a compatible licence. No real household footage is used.
+During the demo, the "emergency contact" and "emergency services" are both teammates' phones. No real emergency number is ever dialled. All demo footage is staged by the team or synthetic. Any third-party clips are used only with organiser approval and a compatible licence. No real household footage is used.
 
 ## Results
 
@@ -235,10 +239,10 @@ All demo footage is staged by the team or synthetic. Any third-party clips are u
 | Criterion                | Weight | Where to look                                                                                       |
 | ------------------------ | :----: | --------------------------------------------------------------------------------------------------- |
 | AI capability            | 25%    | [How it works](#how-it-works): CV screening → VLM reasoning with home context → Telegram alert → automatic emergency call |
-| Local AI on the ATOM     | 25%    | [Why it has to run locally](#why-it-has-to-run-locally); demo step 6                                |
+| Local AI on the ATOM     | 25%    | [Why it has to run locally](#why-it-has-to-run-locally); [demo.md](demo.md) step 6                    |
 | Impact & feasibility     | 20%    | [The problem](#the-problem): reuses existing cameras, no subscription, privacy-preserving           |
 | Technical implementation | 15%    | [Demo](#demo) and [Results](#results)                                                               |
-| Pitch & demo             | 15%    | Live demo of a true alarm, a rejected false alarm and the automatic emergency call                  |
+| Pitch & demo             | 15%    | [demo.md](demo.md): live elderly-fall scenario from dashboard to emergency call                     |
 
 ## Roadmap
 
@@ -248,6 +252,8 @@ All demo footage is staged by the team or synthetic. Any third-party clips are u
 - [ ] Text-only Telegram alerts with action buttons
 - [ ] Acknowledgement tracking with a 3-minute timeout
 - [ ] Automatic emergency call to the emergency contact
+- [ ] Voice agent on the call: explain, guide from the first-aid checklist, offer to call emergency services
+- [ ] Dashboard with camera view and video upload for demos
 - [ ] Event log with rejected candidates
 - [ ] Water leak and child-safety scenarios
 - [ ] Local alarm when the internet is down
