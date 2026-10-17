@@ -21,16 +21,13 @@ sequenceDiagram
     autonumber
     participant Cam as Dashboard / camera feed
     participant Atom as Sentry on ATOM (Nemotron)
-    participant Admin as Admin (Telegram)
     participant Contact as Emergency contact (phone)
     participant ES as Emergency services (teammate)
 
     Cam->>Atom: Uploaded fall video plays; a frame is sent every 0.5 s
     Atom->>Atom: Nemotron analyses each frame and returns a structured verdict
     Atom->>Atom: First fall frame: possible fall. Still down 2 s later: fall confirmed
-    Atom->>Admin: Text alert: "Fall detected in the living room"
-    Note over Admin: Left unanswered. Timeout shortened from 3 min for the demo
-    Atom->>Contact: Automatic phone call
+    Atom->>Contact: Immediate phone call, no text message first
     Atom->>Contact: What happened
     Atom->>Contact: What to do now
     Atom->>Contact: "Do you want me to call emergency services?"
@@ -58,7 +55,6 @@ Every AI step runs on the ATOM through the local inference endpoint. No cloud LL
 | Role                       | Who / what                                                                       |
 | -------------------------- | -------------------------------------------------------------------------------- |
 | Presenter                  | Drives the dashboard and narrates                                                |
-| Admin                      | A team member's Telegram account. Receives the text alert and leaves it unanswered |
 | Emergency contact          | A team member's phone, on speaker so the judges can hear the call                |
 | "Emergency services"       | A second team member's phone. **Never a real emergency number.**                 |
 | ATOM                       | Runs Sentry and the Nemotron models. `nvidia-smi` is open in a terminal on screen |
@@ -97,9 +93,7 @@ Demo video: a staged or synthetic clip of an elderly person falling (no real hou
 }
 ```
 
-- the admin's phone receives the Telegram text alert. Nobody answers it.
-
-**Say:** *"Nemotron is analysing the video frame by frame, right here on the ATOM. One frame could be wrong, so Sentry waits until Nemotron still sees her on the floor two seconds later, and only then confirms the fall. The admin gets a text alert, but in real life they might be in a meeting. Normally Sentry waits 3 minutes; for the demo we've shortened that."*
+**Say:** *"Nemotron is analysing the video frame by frame, right here on the ATOM. One frame could be wrong, so Sentry waits until Nemotron still sees her on the floor two seconds later, and only then confirms the fall. A fall is urgent, so Sentry doesn't send a text that might sit unread. It calls the emergency contact straight away."*
 
 ### 4. Sentry calls the emergency contact (≈ 1 min 30 s)
 
@@ -107,7 +101,7 @@ Demo video: a staged or synthetic clip of an elderly person falling (no real hou
 
 **The call:** the text below is an example. Nemotron generates it from the verdict and the first-aid checklist.
 
-> **Sentry:** "Hello, this is Sentry, the home safety system at the Tan family home. At 2:41 pm, Mdm. Tan appears to have **fallen in the living room** beside the sofa, and she has not got up. The household admin has not responded to the alert."
+> **Sentry:** "Hello, this is Sentry, the home safety system at the Tan family home. At 2:41 pm, Mdm. Tan appears to have **fallen in the living room** beside the sofa, and she has not got up."
 >
 > **Sentry:** "Here is what to do right now:
 > 1. If you can, go to her or call someone nearby who can.
@@ -128,36 +122,33 @@ Demo video: a staged or synthetic clip of an elderly person falling (no real hou
 The workflow panel then shows **Completed**, and the event timeline lists every step with timestamps:
 - detected
 - verified
-- admin alerted
 - contact called
 - guidance given
 - emergency services called
 
-If the contact answers **"No"**, Sentry doesn't make the second call. It logs the answer and sends the admin an update on Telegram.
+If the contact answers **"No"**, Sentry doesn't make the second call. It logs the answer on the dashboard.
 
 ### 6. Prove it's local (≈ 15 s)
 
 **On screen:** switch to the ATOM terminal and show `nvidia-smi` and the inference request log, which were active during the call.
 
-**Say:** *"Every model call you just saw ran on this ATOM. The only things that left the house were a text message and two phone calls."*
+**Say:** *"Every model call you just saw ran on this ATOM. The only things that left the house were two phone calls."*
 
 ## What runs locally vs. what leaves the house
 
 | Runs on the ATOM                                         | Leaves the house                                      |
 | -------------------------------------------------------- | ----------------------------------------------------- |
-| Video decoding and frame sampling                        | Telegram text alert to the admin (no images)          |
-| Frame-by-frame fall detection with Nemotron              | Voice calls to the emergency contact and "emergency services" (spoken text only) |
-| Generating the call script, guidance and reply understanding | Nothing else. No video, clips or snapshots           |
+| Video decoding and frame sampling                        | Voice calls to the emergency contact and "emergency services" (spoken text only) |
+| Frame-by-frame fall detection with Nemotron              | Nothing else. No text messages, video, clips or snapshots |
+| Generating the call script, guidance and reply understanding |                                                   |
 | Event log and dashboard                                  |                                                       |
 
 ## Pre-demo checklist
 
 - [ ] The local inference endpoint is up, and the Nemotron model IDs are confirmed (`/v1/models`)
-- [ ] The demo timeout is set to a few seconds (`ACK_TIMEOUT_SECONDS`), not 180
 - [ ] `EMERGENCY_CONTACT_PHONE` and the "emergency services" number are **both teammates' phones**
 - [ ] The phones are charged, unmuted and off silent, and the emergency contact's phone is ready for speaker
 - [ ] The fall clip is loaded on the dashboard machine
-- [ ] The Telegram bot has been started by the admin account
 - [ ] The `nvidia-smi` terminal is open in a second window
 - [ ] A dry run has been done end to end at least once
 - [ ] **Backup:** a screen recording of a successful run, in case the venue network or a phone call fails
