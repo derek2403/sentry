@@ -11,7 +11,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "mock": "node scripts/mock-nemotron.mjs",
     "calls:serve": ".venv/bin/python -m sentry_calls serve",
-    "calls:tunnel": "ngrok http 5050 --url=gyration-sandworm-ultra.ngrok-free.dev",
+    "calls:tunnel": "ngrok http 5050",
     "calls:history": ".venv/bin/python -m sentry_calls history"
   },
   "dependencies": {

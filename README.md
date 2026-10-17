@@ -115,10 +115,10 @@ The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it 
 | ----------------- | --------------------------------------------------------------------------- |
 | Hardware              | GIGABYTE AI TOP ATOM (NVIDIA DGX Spark platform, ARM64)                          |
 | Vision-language model | NVIDIA Nemotron, served by the vLLM endpoint already configured on the ATOM (OpenAI-compatible) |
-| App                   | Next.js 16 (App Router), TypeScript, Tailwind CSS: dashboard and API routes      |
-| Frame capture         | In the dashboard: `<video>` + canvas, for an uploaded video or a webcam          |
+| App                   | Next.js 16 (App Router), TypeScript: camera dashboard and API routes             |
+| Frame capture         | In the dashboard: `<video>` + canvas, for each camera's clip or a webcam         |
 | Storage               | Local event log (JSON lines) and fall snapshots in `data/` on the ATOM           |
-| Emergency calls *(next)* | Voice-call API (e.g. Twilio) with a text-to-speech message                    |
+| Emergency calls       | `sentry_calls` (Python, Flask): Twilio voice call with a fixed script; started locally when a fall is confirmed (see [CALLS.md](CALLS.md)) |
 
 > **Model notes**
 > - Frame-by-frame analysis needs a model that accepts **image input**. On the ACE 2026 ATOM that is **Nemotron 3 Nano Omni** (`omni`, port 9001). The briefing's baseline, Nemotron 3.5 Lightning (`lightning`, port 9000), and Nemotron 3 Nano (`nano`, port 9006) are text-only and reject images. Set `LLM_BASE_URL` and `LLM_MODEL=omni` in `.env.local`.
@@ -142,21 +142,28 @@ The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it 
 git clone <this-repo-url> sentry
 cd sentry
 npm install
-cp .env.example .env.local   # then adjust the values (see the comments in the file)
+python3 -m venv .venv && .venv/bin/pip install -r requirements-calls.txt   # the call service
+cp .env.example .env         # then fill in the values (see the comments in the file)
 ```
 
-The most important settings in `.env.local`:
+The most important settings in `.env`:
 
 | Variable | Default | What it does |
 | -------- | ------- | ------------ |
-| `LLM_BASE_URL` | `http://localhost:8000/v1` | The ATOM's local inference endpoint |
-| `LLM_MODEL` | first served model | Nemotron model ID |
-| `ANALYSIS_INTERVAL_S` | `0.5` | Seconds of video between analysed frames |
+| `LLM_BASE_URL` | `http://localhost:9001/v1` | The ATOM's local inference endpoint |
+| `LLM_MODEL` | `omni` | Nemotron model ID |
+| `ANALYSIS_INTERVAL_S` | `0.5` | Seconds between analysed frames |
 | `FALL_CONFIRM_FRAMES` / `FALL_CONFIRM_SECONDS` | `2` / `2` | How many fall frames, over how long, confirm a fall |
 | `FALL_MIN_CONFIDENCE` | `0.5` | Ignore fall verdicts below this confidence |
-| `HOLD_LAST_FRAME_S` | `8` | After a video ends, keep checking its last frame this long |
+| `EMERGENCY_CALLS` | `off` | `on` = call the emergency contact when a fall is confirmed, `simulate` = print the call script only |
+| `EMERGENCY_CALL_DELAY_S` | `0` | Wait before calling; **Mark OK** on the dashboard in that time cancels the call |
+| `EMERGENCY_CONTACT_PHONE`, `APPROVED_DEMO_NUMBERS`, `TWILIO_*`, `PUBLIC_BASE_URL` | – | Call service settings, see [CALLS.md](CALLS.md) |
 
-Never commit `.env.local` or `data/` (event log and snapshots). Both are already in `.gitignore`.
+Never commit `.env`, `.env.local`, `data/` (event log and snapshots) or `public/videos/` clips. All are in `.gitignore`.
+
+### Camera clips
+
+Put one clip per camera in `public/videos/` (names in [public/videos/README.md](public/videos/README.md), cameras and map in `lib/client/cameras.ts`), or press **Upload video** / drop a file on the screen to play it on the current camera. A clip waits on its first frame until you press **Space**, plays once, then stays on its last frame. Sentry keeps analysing that last frame like a live camera, so a fall at the very end is still confirmed.
 
 ### Verify the local model
 
@@ -173,9 +180,18 @@ Use the host and port the organisers gave you if they differ from vLLM's default
 npm run build && npm start      # or `npm run dev` while developing
 ```
 
-Open **http://localhost:3000**. When you connect through NVIDIA Sync / VS Code, forward port 3000 to your laptop and open it on `localhost`. The browser only allows the **Use camera** button on `localhost` or HTTPS. The header shows **Nemotron ready** once the endpoint answers.
+Open **http://localhost:3000**. When you connect through NVIDIA Sync / VS Code, forward port 3000 to your laptop and open it on `localhost`. The browser only allows the webcam camera (CAM 5) on `localhost` or HTTPS. The AI log says **Nemotron offline** if the endpoint doesn't answer.
 
-Restart the server after changing `.env.local` or anything in `lib/server/`.
+Restart the server after changing `.env`, `.env.local` or anything in `lib/server/`.
+
+For real emergency calls, also run the call service and an HTTPS tunnel to it on the same machine as the dashboard, and set `PUBLIC_BASE_URL` to the tunnel's address:
+
+```bash
+npm run calls:serve      # Twilio callback server on 127.0.0.1:5050
+ngrok http 5050          # copy the https URL into PUBLIC_BASE_URL in .env, then restart both servers
+```
+
+Before each call Sentry checks that both answer; if not, it logs why in the AI log and doesn't place a broken call. `npm run calls:history` shows what happened on each call.
 
 ### Running the app on a laptop against the ATOM's model
 
@@ -205,6 +221,7 @@ The mock ignores the image: it answers "standing" for the first few frames of ea
 npm test          # fall logic and verdict parsing
 npm run lint
 npm run typecheck
+.venv/bin/python -m unittest discover -s tests -v   # call service
 ```
 
 ### Project layout
@@ -212,15 +229,18 @@ npm run typecheck
 ```text
 app/                    Next.js App Router: the dashboard page and the API routes
   api/sessions/         start/stop an analysis session; POST each frame to …/[id]/frames
-  api/logs/             Backlog entries
+  api/logs/             AI log entries (GET), and POST to log LLM output from other components
   api/status/           model health, settings and the active alert
-components/             Dashboard UI (camera view, Nemotron panel, Backlog drawer)
-lib/client/             useFrameAnalyzer: samples frames from the video and sends them
+components/             Camera screen, floor-plan map with CAM buttons, AI log
+lib/client/cameras.ts   cameras, rooms and map layout
+lib/client/             useFrameAnalyzer: samples frames from the camera on screen and sends them
 lib/server/nemotron.ts  calls Nemotron on the local vLLM endpoint
 lib/server/fall.ts      turns per-frame verdicts into fall events
-lib/server/workflow.ts  emergency workflow hook (the emergency call goes here)
+lib/server/workflow.ts  emergency workflow: starts the sentry_calls call when a fall is confirmed
+sentry_calls/           Twilio call service (explain, first-aid checklist, ask to escalate)
+public/videos/          camera clips (not committed)
 scripts/mock-nemotron.mjs  fake endpoint for development
-tests/                  unit tests (vitest)
+tests/                  unit tests (vitest, and unittest for the call service)
 ```
 
 ## Demo
@@ -257,11 +277,11 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 
 ## Roadmap
 
-- [x] Dashboard with camera view, video upload and Backlog
+- [x] Camera dashboard with floor-plan map, CAM buttons, video upload and AI log
 - [x] Frame-by-frame fall detection with Nemotron and structured verdicts
 - [x] Fall confirmation across frames, with every verdict and false alarm logged
-- [ ] Automatic emergency call to the emergency contact as soon as a fall is confirmed
-- [ ] Voice agent on the call: explain, guide from the first-aid checklist, offer to call emergency services
+- [x] Automatic emergency call to the emergency contact as soon as a fall is confirmed
+- [x] Call script: explain, guide from the first-aid checklist, offer to call emergency services (a teammate in the demo)
 - [ ] RTSP / IP camera ingestion on the ATOM (today: uploaded video or browser webcam)
 - [ ] Home profile in the prompt (for example, "Grandma naps on the sofa after lunch")
 - [ ] Fire/smoke, water leak and child-safety scenarios
