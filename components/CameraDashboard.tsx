@@ -103,25 +103,6 @@ export default function CameraDashboard() {
 
   // ---------- Videos ----------
 
-  // One stable ref callback per camera (a new function every render would re-register each time).
-  const videoRefs = useMemo(
-    () =>
-      Object.fromEntries(
-        CAMERAS.map((c) => [
-          c.id,
-          (el: HTMLVideoElement | null) =>
-            setVideoEls((els) => {
-              if (el === (els[c.id] ?? null)) return els;
-              const next = { ...els };
-              if (el) next[c.id] = el;
-              else delete next[c.id];
-              return next;
-            }),
-        ]),
-      ),
-    [],
-  );
-
   const markVideo = useCallback((camId: string, ok: boolean) => {
     setHasVideo((set) => {
       if (set.has(camId) === ok) return set;
@@ -131,6 +112,31 @@ export default function CameraDashboard() {
       return next;
     });
   }, []);
+
+  // One stable ref callback per camera (a new function every render would re-register each time).
+  const videoRefs = useMemo(
+    () =>
+      Object.fromEntries(
+        CAMERAS.map((c) => [
+          c.id,
+          (el: HTMLVideoElement | null) => {
+            setVideoEls((els) => {
+              if (el === (els[c.id] ?? null)) return els;
+              const next = { ...els };
+              if (el) next[c.id] = el;
+              else delete next[c.id];
+              return next;
+            });
+            // The server-rendered <video> can finish loading before React attaches onLoadedData.
+            if (el && el.readyState >= 2 && c.source !== "webcam") {
+              markVideo(c.id, true);
+              setPlayState((s) => ({ ...s, [c.id]: el.ended ? "ended" : el.paused ? "ready" : "playing" }));
+            }
+          },
+        ]),
+      ),
+    [markVideo],
+  );
 
   const restartAnalysis = useCallback((camId: string) => {
     setRunVersion((v) => ({ ...v, [camId]: (v[camId] ?? 0) + 1 }));
@@ -221,16 +227,12 @@ export default function CameraDashboard() {
       const video = videoElsRef.current[camId];
       if (!video || CAMERA_BY_ID.get(camId)?.source === "webcam" || video.readyState < 2) return;
       e.preventDefault();
-      if (video.ended) {
-        // Play it again from the start, with a fresh analysis session.
-        video.currentTime = 0;
-        restartAnalysis(camId);
-      }
-      if (video.paused) video.play().catch(() => {});
+      // Space only starts a clip. Once it has ended it stays on its last frame.
+      if (video.paused && !video.ended) video.play().catch(() => {});
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [restartAnalysis]);
+  }, []);
 
   // ---------- Look around with the cursor ----------
 
