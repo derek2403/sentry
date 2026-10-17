@@ -10,13 +10,13 @@
 
 | # | Slide | What it covers |
 | - | ----- | -------------- |
-| 1 | Sentry | Cover: "Turns your existing cameras into an emergency responder." |
+| 1 | Sentry | Cover: "Local Agent that turns your existing cameras into an emergency responder." |
 | 2-4 | Three camera clips | An elderly fall, a chest of drawers tipping onto a toddler, a dog stuck on its leash. Full-screen video, no captions. |
 | 5 | Who's watching the cameras? | CCTV records, but nobody watches it 24/7 |
 | 6 | Sentry is / where / and | What Sentry is, in three lines |
-| 7 | No text to miss. Sentry calls. | A fall is urgent, so Sentry calls the emergency contact at once with first-aid steps, then calls 999 only if the contact says yes |
+| 7 | No text to miss. Sentry calls. | A fall is urgent, so Sentry calls the emergency contact at once with a fixed script and first-aid checklist, then makes a second call only if the contact says yes |
 | 8 | How a frame becomes a phone call. | Detect, verify, escalate on the ATOM: a frame every 0.5 s, Nemotron 3 Nano Omni, a multi-frame check, then the call |
-| 9 | Five jobs for Nemotron, all on the ATOM. | Detect, explain, guide, understand the reply, brief emergency services |
+| 9 | Nemotron judges. Harness amplifies. | Nemotron 3 Nano Omni detects the fall and reads the contact's reply. The harness reads the fixed explanation, first-aid steps and summary. |
 | 10 | Demo. | Live demo, see [demo.md](demo.md) |
 
 ## Appendix
