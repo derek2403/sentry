@@ -10,7 +10,7 @@
 
 | # | Slide | What it covers |
 | - | ----- | -------------- |
-| 1 | Sentry | Cover: "a local AI agent that turns your existing cameras into an emergency responder" |
+| 1 | Sentry | Cover: "Turns your existing cameras into an emergency responder." |
 | 2-4 | Three camera clips | An elderly fall, a chest of drawers tipping onto a toddler, a dog stuck on its leash. Full-screen video, no captions. |
 | 5 | Who's watching the cameras? | CCTV records, but nobody watches it 24/7 |
 | 6 | Sentry is / where / and | What Sentry is, in three lines |
