@@ -47,11 +47,20 @@ export default function AiLog({ current, currentHasVideo, playState, lastLatency
 
   useEffect(() => {
     let cancelled = false;
+    let started = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const limit = lastId.current === 0 ? 100 : 500;
-        const res = await fetch(`/api/logs?after=${lastId.current}&limit=${limit}&kinds=${KINDS.join(",")}`, { cache: "no-store" });
+        if (!started) {
+          // Start empty on every page load: skip what's already logged (it stays saved on the server).
+          const res = await fetch("/api/logs?limit=1", { cache: "no-store" });
+          if (!res.ok) return;
+          const { entries: newest } = (await res.json()) as { entries: LogEntry[] };
+          lastId.current = newest[0]?.id ?? 0;
+          started = true;
+          return;
+        }
+        const res = await fetch(`/api/logs?after=${lastId.current}&limit=500&kinds=${KINDS.join(",")}`, { cache: "no-store" });
         if (res.ok) {
           const { entries: fresh } = (await res.json()) as { entries: LogEntry[] };
           if (!cancelled && fresh.length > 0) {
