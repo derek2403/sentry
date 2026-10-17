@@ -1,6 +1,7 @@
 // Parses Nemotron's reply into a FrameVerdict. Kept free of server-only imports so it can be unit-tested.
 
-import type { FrameVerdict, Posture } from "../types";
+import { EMERGENCY_TYPES } from "../emergency";
+import type { EmergencyType, FrameVerdict, Posture } from "../types";
 
 const POSTURES: Posture[] = ["standing", "walking", "sitting", "bending", "lying", "unknown"];
 
@@ -21,13 +22,25 @@ export function parseVerdict(content: string): FrameVerdict {
     throw new Error(`Nemotron returned invalid JSON: ${text.slice(start, start + 120)}`);
   }
 
+  let emergency = toBool(raw.emergency);
+  let type = String(raw.type ?? "").trim().toLowerCase() as EmergencyType;
+  if (raw.emergency === undefined && raw.fall_detected !== undefined) {
+    // Older replies (and the mock endpoint) only report falls.
+    emergency = toBool(raw.fall_detected);
+    type = "fall";
+  }
+  // Keep the two fields consistent: no emergency means "none", an emergency always has a type.
+  if (!emergency) type = "none";
+  else if (type === "none" || !EMERGENCY_TYPES.includes(type)) type = "other";
+
   const posture = String(raw.posture ?? "unknown").toLowerCase() as Posture;
   const confidence = Number(raw.confidence);
   return {
+    emergency,
+    type,
     person_visible: toBool(raw.person_visible),
     posture: POSTURES.includes(posture) ? posture : "unknown",
     on_floor: toBool(raw.on_floor),
-    fall_detected: toBool(raw.fall_detected),
     confidence: Number.isFinite(confidence) ? Math.min(Math.max(confidence, 0), 1) : 0,
     description: String(raw.description ?? "").trim().slice(0, 200),
   };

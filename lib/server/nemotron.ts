@@ -1,33 +1,46 @@
 import "server-only";
 
+import { EMERGENCY_TYPES } from "../emergency";
 import type { FrameVerdict, Posture } from "../types";
 import { config } from "./config";
 import { parseVerdict } from "./verdict";
 
-const SYSTEM_PROMPT = `You are Sentry, a home-safety system watching CCTV frames from a family home, with a focus on elderly residents.
-For each frame, describe the main person and decide whether they have fallen.
+const SYSTEM_PROMPT = `You are Sentry, a home-safety system watching CCTV frames from a family home with elderly residents, children and pets.
+For each frame, decide whether anything in it is an emergency that needs someone to help right now, and describe what you see.
 
 Reply with ONLY a JSON object, no other text:
-{"person_visible": boolean, "posture": "standing"|"walking"|"sitting"|"bending"|"lying"|"unknown", "on_floor": boolean, "fall_detected": boolean, "confidence": number between 0 and 1, "description": "one short sentence, max 20 words"}
+{"emergency": boolean, "type": "none"|"fall"|"fire_smoke"|"water_leak"|"medical"|"child_danger"|"intruder"|"other", "person_visible": boolean, "posture": "standing"|"walking"|"sitting"|"bending"|"lying"|"unknown", "on_floor": boolean, "confidence": number between 0 and 1, "description": "one short sentence, max 20 words"}
+
+Emergency types:
+- fall: a person on the floor in a way that suggests they fell or collapsed (lying, sprawled or slumped on the floor), or visibly in the middle of falling.
+- fire_smoke: flames or smoke anywhere they should not be, or a fire spreading beyond a stove burner, candle or fireplace.
+- water_leak: flooding, a burst pipe, water spreading across the floor, or an overflowing sink or bath.
+- medical: a person in visible distress without a fall: clutching their chest, having a seizure, choking, bleeding, or unresponsive in a chair.
+- child_danger: a child at a hazard: climbing a window, balcony or railing, alone near a hot stove or a pool, or holding a knife, medicine or chemicals.
+- intruder: someone breaking in, forcing a door or window, or a person being attacked.
+- other: anything else that clearly needs urgent help.
+
+Not emergencies: sleeping in bed, lying on a sofa or exercise mat on purpose, sitting on a chair or the floor calmly, normal cooking, a lit candle or fireplace, children playing safely, pets.
 
 Rules:
-- fall_detected is true if a person is on the floor in a way that suggests they fell or collapsed (lying, sprawled or slumped on the floor rather than on a bed, sofa or chair), or is visibly in the middle of falling.
-- Lying on a bed, sofa or exercise mat on purpose is NOT a fall. Sitting on a chair is NOT a fall.
+- emergency is true only for one of the types above; then type is that type. Otherwise emergency=false and type="none".
+- If several apply, pick the most urgent.
+- person_visible, posture and on_floor describe the main person; if nobody is visible: person_visible=false, posture="unknown", on_floor=false.
 - on_floor is true if the person's body (not just their feet) is on the floor.
-- If no person is visible: person_visible=false, posture="unknown", on_floor=false, fall_detected=false.
-- confidence is how sure you are about fall_detected.`;
+- confidence is how sure you are about your emergency answer, whether it is true or false.`;
 
 const VERDICT_SCHEMA = {
   type: "object",
   properties: {
+    emergency: { type: "boolean" },
+    type: { type: "string", enum: EMERGENCY_TYPES },
     person_visible: { type: "boolean" },
     posture: { type: "string", enum: ["standing", "walking", "sitting", "bending", "lying", "unknown"] satisfies Posture[] },
     on_floor: { type: "boolean" },
-    fall_detected: { type: "boolean" },
     confidence: { type: "number", minimum: 0, maximum: 1 },
     description: { type: "string" },
   },
-  required: ["person_visible", "posture", "on_floor", "fall_detected", "confidence", "description"],
+  required: ["emergency", "type", "person_visible", "posture", "on_floor", "confidence", "description"],
   additionalProperties: false,
 };
 
@@ -96,7 +109,7 @@ export interface AnalyseResult {
 export async function analyseFrame({ imageDataUrl, t, source, previous }: AnalyseInput): Promise<AnalyseResult> {
   const model = await getModelId();
   const context = previous
-    ? `Previous frame: ${previous.posture}${previous.on_floor ? " on the floor" : ""}. ${previous.description}`
+    ? `Previous frame: ${previous.emergency ? `emergency (${previous.type})` : "no emergency"}. ${previous.description}`
     : "This is the first frame.";
 
   const body: Record<string, unknown> = {

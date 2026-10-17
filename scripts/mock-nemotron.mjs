@@ -16,8 +16,8 @@ const MODEL = "mock-nemotron";
 let frame = 0;
 let lastRequest = 0;
 
-const standing = { person_visible: true, posture: "standing", on_floor: false, fall_detected: false, confidence: 0.9, description: "An elderly person is standing in the living room." };
-const fallen = { person_visible: true, posture: "lying", on_floor: true, fall_detected: true, confidence: 0.92, description: "An elderly person is lying on the floor beside the sofa after a fall." };
+const standing = { emergency: false, type: "none", person_visible: true, posture: "standing", on_floor: false, confidence: 0.9, description: "An elderly person is standing in the living room." };
+const fallen = { emergency: true, type: "fall", person_visible: true, posture: "lying", on_floor: true, confidence: 0.92, description: "An elderly person is lying on the floor beside the sofa after a fall." };
 
 const server = http.createServer((req, res) => {
   const send = (status, body) => {

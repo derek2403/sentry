@@ -29,13 +29,19 @@ Families are busier than ever, so more and more homes rely on CCTV to keep an ey
 
 Sentry connects to existing IP/RTSP or USB cameras, works out what is happening in each scene, and only calls someone when something needs attention.
 
-| Who / what   | Emergencies Sentry looks for                                                           | Scope   |
-| ------------ | -------------------------------------------------------------------------------------- | ------- |
-| 👵 Elderly    | Falls, and a person lying on the floor without moving for a prolonged period          | MVP     |
-| 🏠 Home       | Fire and smoke                                                                         | MVP     |
-| 🏠 Home       | Water leaks and flooding                                                               | Stretch |
-| 🧒 Children   | Climbing furniture or windows, getting close to hazards (stove, balcony, pool)         | Stretch |
-| 🐾 Pets       | Pet in distress or in a dangerous area                                                 | Stretch |
+Every analysed frame is checked by Nemotron for any of these emergencies (the `type` in its answer):
+
+| Who / what   | Emergencies Sentry looks for                                                           | `type`         |
+| ------------ | -------------------------------------------------------------------------------------- | -------------- |
+| 👵 Elderly    | Falls: a person on the floor after a fall or collapse, or in the middle of falling     | `fall`         |
+| 👵 Elderly    | Medical distress without a fall: clutching the chest, seizure, choking, bleeding, unresponsive | `medical` |
+| 🏠 Home       | Fire and smoke where they shouldn't be                                                 | `fire_smoke`   |
+| 🏠 Home       | Water leaks, burst pipes and flooding                                                  | `water_leak`   |
+| 🧒 Children   | A child at a hazard: window, balcony or railing, hot stove, pool, knives or medicine    | `child_danger` |
+| 🔒 Security   | Break-ins and violence                                                                 | `intruder`     |
+| ❗ Anything else | Any other situation that clearly needs urgent help                                  | `other`        |
+
+Normal life is not an emergency: sleeping, lying on the sofa, sitting on the floor calmly, cooking, a lit candle or fireplace, children playing safely, pets.
 
 ### Automatic emergency call
 

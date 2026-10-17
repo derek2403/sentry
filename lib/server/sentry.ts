@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { Alert, FrameResult, FrameVerdict, LlmLogData, LogEntry, SessionInfo, SourceKind } from "../types";
+import { emergencyLabel } from "../emergency";
+import type { Alert, EmergencyType, FrameResult, FrameVerdict, LlmLogData, LogEntry, SessionInfo, SourceKind } from "../types";
 import { config } from "./config";
 import { EventLog } from "./events";
 import { FallDetector } from "./fall";
@@ -149,19 +150,22 @@ class Sentry {
       session.previous = verdict;
       const { state, events } = session.detector.update(verdict, t);
 
-      this.logLlmOutput({ source, camera, output, fall: verdict.fall_detected, t, confidence: verdict.confidence, model, latencyMs, verdict });
+      this.logLlmOutput({
+        source, camera, output, emergency: verdict.emergency, type: verdict.type, t, confidence: verdict.confidence, model, latencyMs, verdict,
+      });
 
       for (const event of events) {
-        const data = { t, confidence: verdict.confidence };
+        const data = { t, confidence: verdict.confidence, type: event.type };
         const detail = event.detail.replace(/[.\s]+$/, "");
+        const what = emergencyLabel(event.type);
         if (event.kind === "possible_fall") {
-          this.log.add({ kind: event.kind, level: "warning", source, camera, data, message: `Possible fall: ${detail}. Confirming with the next frames.` });
+          this.log.add({ kind: event.kind, level: "warning", source, camera, data, message: `Possible emergency (${what}): ${detail}. Confirming with the next frames.` });
         } else if (event.kind === "fall_cancelled") {
-          this.log.add({ kind: event.kind, source, camera, data, message: `False alarm: ${detail}.` });
+          this.log.add({ kind: event.kind, source, camera, data, message: `False alarm (${what}): ${detail}.` });
         } else if (event.kind === "recovered") {
-          this.log.add({ kind: event.kind, source, camera, data, message: `Recovered: ${detail}.` });
+          this.log.add({ kind: event.kind, source, camera, data, message: `Resolved (${what}): ${detail}.` });
         } else if (event.kind === "fall_confirmed") {
-          this.raiseAlert(session.id, source, camera, t, detail, imageDataUrl);
+          this.raiseAlert(session.id, source, camera, event.type, t, detail, imageDataUrl);
         }
       }
 
@@ -172,22 +176,26 @@ class Sentry {
   }
 
   /**
-   * Logs one LLM answer to the Backlog: the model's output and whether it saw a fall.
+   * Logs one LLM answer to the AI log: the model's output and whether it saw an emergency.
    * Used for every analysed frame, and by POST /api/logs for LLM output from elsewhere.
    */
   logLlmOutput(entry: {
     source: string | null;
     camera?: string | null;
     output: string;
-    fall: boolean;
+    emergency: boolean;
+    type?: EmergencyType;
     t?: number | null;
     confidence?: number | null;
     model?: string | null;
     latencyMs?: number | null;
     verdict?: FrameVerdict | null;
   }): LogEntry {
+    const type: EmergencyType = entry.emergency ? (entry.type && entry.type !== "none" ? entry.type : "other") : "none";
     const data: LlmLogData = {
-      fall: entry.fall,
+      emergency: entry.emergency,
+      type,
+      fall: type === "fall",
       output: entry.output,
       t: entry.t ?? null,
       confidence: entry.confidence ?? null,
@@ -199,16 +207,25 @@ class Sentry {
       kind: "frame",
       source: entry.source,
       camera: entry.camera ?? null,
-      message: `${entry.fall ? "FALL" : "No fall"} · ${summariseOutput(entry.output)}`,
+      message: `${entry.emergency ? emergencyLabel(type).toUpperCase() : "No emergency"} · ${summariseOutput(entry.output)}`,
       data: { ...data },
     });
   }
 
-  private raiseAlert(sessionId: string, source: string, camera: string | null, t: number, detail: string, imageDataUrl: string): void {
+  private raiseAlert(
+    sessionId: string,
+    source: string,
+    camera: string | null,
+    type: EmergencyType,
+    t: number,
+    detail: string,
+    imageDataUrl: string,
+  ): void {
+    const what = emergencyLabel(type);
     if (this.s.alert && this.s.alert.camera === camera && this.s.alertSession === sessionId) {
-      // Same person, same feed, nobody has marked it OK yet: don't alert (or call) again.
+      // Same incident on the same feed, nobody has marked it OK yet: don't alert (or call) again.
       // A new playback or camera session is a new incident and does alert again.
-      this.log.add({ kind: "fall_confirmed", level: "warning", source, camera, data: { t }, message: `Still down: ${detail}. Alert already active.` });
+      this.log.add({ kind: "fall_confirmed", level: "warning", source, camera, data: { t, type }, message: `Still ongoing (${what}): ${detail}. Alert already active.` });
       return;
     }
     const snapshot = this.saveSnapshot(imageDataUrl);
@@ -218,10 +235,10 @@ class Sentry {
       source,
       camera,
       snapshot,
-      data: { t },
-      message: `FALL DETECTED in ${source}: ${detail}`,
+      data: { t, type },
+      message: `${what.toUpperCase()} DETECTED in ${source}: ${detail}`,
     });
-    const alert: Alert = { eventId: entry.id, ts: entry.ts, location: source, camera, message: entry.message, snapshot, videoTime: t };
+    const alert: Alert = { eventId: entry.id, ts: entry.ts, location: source, camera, type, message: entry.message, snapshot, videoTime: t };
     this.s.alert = alert;
     this.s.alertSession = sessionId;
     // Don't hold up the frame response while the workflow runs.

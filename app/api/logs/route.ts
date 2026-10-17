@@ -1,5 +1,6 @@
+import { EMERGENCY_TYPES } from "@/lib/emergency";
 import { sentry } from "@/lib/server/sentry";
-import type { LogKind } from "@/lib/types";
+import type { EmergencyType, LogKind } from "@/lib/types";
 
 const MAX_OUTPUT_CHARS = 8_000;
 
@@ -13,20 +14,27 @@ export async function GET(request: Request) {
 }
 
 /**
- * Log one LLM answer to the Backlog, for LLM output produced outside the frame analyser.
- * Body: { output: string, fall: boolean, source?: string, camera?: string, t?: number, confidence?: number, model?: string }
+ * Log one LLM answer to the AI log, for LLM output produced outside the frame analyser.
+ * Body: { output: string, emergency: boolean, type?: "fall" | "fire_smoke" | ..., source?: string,
+ *         camera?: string, t?: number, confidence?: number, model?: string }
+ * The older `fall: boolean` is still accepted in place of `emergency`.
  */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!body || typeof body.output !== "string" || typeof body.fall !== "boolean") {
-    return Response.json({ error: 'body must include "output" (string) and "fall" (boolean)' }, { status: 400 });
+  const emergency = typeof body?.emergency === "boolean" ? body.emergency : typeof body?.fall === "boolean" ? body.fall : null;
+  if (!body || typeof body.output !== "string" || emergency === null) {
+    return Response.json({ error: 'body must include "output" (string) and "emergency" (boolean)' }, { status: 400 });
   }
+  const type = typeof body.type === "string" && EMERGENCY_TYPES.includes(body.type as EmergencyType)
+    ? (body.type as EmergencyType)
+    : body.fall === true ? "fall" : undefined;
   const optionalNumber = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const optionalString = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null);
 
   const entry = sentry().logLlmOutput({
     output: body.output.slice(0, MAX_OUTPUT_CHARS),
-    fall: body.fall,
+    emergency,
+    type,
     source: optionalString(body.source, 120),
     camera: optionalString(body.camera, 40),
     t: optionalNumber(body.t),

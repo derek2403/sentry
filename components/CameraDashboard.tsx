@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CAMERA_BY_ID, CAMERAS, DEFAULT_CAMERA, cameraLabel } from "@/lib/client/cameras";
 import { panelDrag } from "@/lib/client/panels";
 import { useFrameAnalyzer, type AnalyzerSource } from "@/lib/client/useFrameAnalyzer";
+import { emergencyLabel } from "@/lib/emergency";
 import type { Alert, FrameResult, StatusResponse } from "@/lib/types";
 
 import AiLog from "./AiLog";
@@ -401,7 +402,7 @@ export default function CameraDashboard() {
         current={cam}
         hasVideo={hasVideo}
         alertCameras={alertCameras}
-        alertTitle={alert && alert.camera === current ? "Fall detected" : null}
+        alertTitle={alert && alert.camera === current ? `${emergencyLabel(alert.type ?? "fall")} detected` : null}
         canUpload={!isWebcam}
         onSelect={show}
         onMarkOk={markOk}

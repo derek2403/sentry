@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { CAMERA_BY_ID, cameraLabel, type Camera } from "@/lib/client/cameras";
 import { useDraggable, useMinimised } from "@/lib/client/panels";
-import type { LlmLogData, LogEntry, LogKind, StatusResponse } from "@/lib/types";
+import { emergencyLabel } from "@/lib/emergency";
+import type { EmergencyType, LlmLogData, LogEntry, LogKind, StatusResponse } from "@/lib/types";
 
 import type { PlayState } from "./CameraDashboard";
 
@@ -14,7 +15,7 @@ const MAX_ENTRIES = 200;
 const KINDS: LogKind[] = ["frame", "possible_fall", "fall_confirmed", "fall_cancelled", "recovered", "workflow", "alert", "error"];
 
 type Status = "normal" | "watch" | "emergency" | "error" | "info";
-type Filter = "all" | "falls";
+type Filter = "all" | "emergencies";
 
 interface View {
   status: Status;
@@ -23,7 +24,7 @@ interface View {
   summary: string;
   meta: string | null;
   raw: string | null;
-  fall: boolean;
+  alarm: boolean; // an emergency, shown under "Emergencies only"
 }
 
 interface Props {
@@ -36,7 +37,7 @@ interface Props {
   onSelectCamera: (camId: string) => void;
 }
 
-/** What the local AI says about the cameras: every Nemotron answer (fall or no fall) and the events it led to. */
+/** What the local AI says about the cameras: every Nemotron answer (emergency or not) and the events it led to. */
 export default function AiLog({ current, currentHasVideo, playState, lastLatencyMs, model, error, onSelectCamera }: Props) {
   const { panel: panelRef, handle: headRef } = useDraggable<HTMLElement, HTMLElement>("sentry.aiLog.position");
   const [minimised, setMinimised] = useMinimised("sentry.aiLog.minimised", "(max-width: 640px)");
@@ -89,7 +90,7 @@ export default function AiLog({ current, currentHasVideo, playState, lastLatency
   };
 
   const views = entries.map((e) => ({ entry: e, view: toView(e) }));
-  const visible = filter === "falls" ? views.filter(({ view }) => view.fall || view.status === "emergency" || view.status === "watch") : views;
+  const visible = filter === "emergencies" ? views.filter(({ view }) => view.alarm || view.status === "emergency" || view.status === "watch") : views;
   const lastLlm = views.find(({ entry }) => entry.kind === "frame");
   const dotStatus = lastLlm?.view.status ?? "info";
 
@@ -132,14 +133,14 @@ export default function AiLog({ current, currentHasVideo, playState, lastLatency
           <button type="button" aria-pressed={filter === "all"} onClick={() => setFilter("all")}>
             All
           </button>
-          <button type="button" aria-pressed={filter === "falls"} onClick={() => setFilter("falls")}>
-            Falls only
+          <button type="button" aria-pressed={filter === "emergencies"} onClick={() => setFilter("emergencies")}>
+            Emergencies only
           </button>
         </div>
         <ol className="ailog-list">
           {visible.length === 0 && (
             <li className="log-empty">
-              {filter === "falls" ? "No falls so far." : "Nemotron describes the camera on screen frame by frame. Its first answer is on the way."}
+              {filter === "emergencies" ? "No emergencies so far." : "Nemotron describes the camera on screen frame by frame. Its first answer is on the way."}
             </li>
           )}
           {visible.map(({ entry, view }) => {
@@ -167,7 +168,7 @@ export default function AiLog({ current, currentHasVideo, playState, lastLatency
                 )}
                 {entry.snapshot && (
                   // eslint-disable-next-line @next/next/no-img-element -- local snapshot served by our own API
-                  <img src={entry.snapshot} alt="Frame where the fall was confirmed" style={{ display: "block", width: "100%", marginTop: 6, borderRadius: 4 }} />
+                  <img src={entry.snapshot} alt="Frame where the emergency was confirmed" style={{ display: "block", width: "100%", marginTop: 6, borderRadius: 4 }} />
                 )}
               </li>
             );
@@ -185,34 +186,37 @@ export default function AiLog({ current, currentHasVideo, playState, lastLatency
 function toView(e: LogEntry): View {
   if (e.kind === "frame") {
     const d = e.data as Partial<LlmLogData> | null;
-    const fall = d?.fall === true;
+    // Older entries only have `fall`.
+    const emergency = d?.emergency ?? d?.fall === true;
+    const type = d?.type ?? (emergency ? "fall" : "none");
     const meta = [
       typeof d?.latencyMs === "number" && `${(d.latencyMs / 1000).toFixed(1)} s on the local AI`,
       typeof d?.confidence === "number" && `${Math.round(d.confidence * 100)}% sure`,
       d?.model,
     ].filter(Boolean);
     return {
-      status: fall ? "emergency" : "normal",
-      tag: fall ? "Fall" : "No fall",
+      status: emergency ? "emergency" : "normal",
+      tag: emergency ? emergencyLabel(type) : "No emergency",
       event: null,
-      summary: d?.verdict?.description || e.message.replace(/^(FALL|No fall) · /, ""),
+      summary: d?.verdict?.description || e.message.replace(/^[^·]+ · /, ""),
       meta: meta.length ? meta.join(" · ") : null,
       raw: typeof d?.output === "string" ? prettyJson(d.output) : null,
-      fall,
+      alarm: emergency,
     };
   }
-  const base = { event: null, meta: null, raw: null, fall: false, summary: e.message };
+  const what = emergencyLabel((e.data as { type?: EmergencyType } | null)?.type ?? "fall");
+  const base = { event: null, meta: null, raw: null, alarm: false, summary: e.message };
   switch (e.kind) {
     case "possible_fall":
-      return { ...base, status: "watch", tag: "Possible fall" };
+      return { ...base, status: "watch", tag: "Possible emergency" };
     case "fall_confirmed":
       return e.level === "critical"
-        ? { ...base, status: "emergency", tag: "Emergency", event: "Fall confirmed", fall: true }
-        : { ...base, status: "watch", tag: "Still down" };
+        ? { ...base, status: "emergency", tag: "Emergency", event: `${what} confirmed`, alarm: true }
+        : { ...base, status: "watch", tag: "Still ongoing" };
     case "fall_cancelled":
       return { ...base, status: "normal", tag: "False alarm" };
     case "recovered":
-      return { ...base, status: "normal", tag: "Recovered" };
+      return { ...base, status: "normal", tag: "Resolved" };
     case "error":
       return { ...base, status: "error", tag: "Problem" };
     case "workflow":
