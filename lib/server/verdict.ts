@@ -33,6 +33,19 @@ export function parseVerdict(content: string): FrameVerdict {
   };
 }
 
+/** A one-line summary of an LLM reply for the Backlog: its "description" if it is JSON, else the text itself. */
+export function summariseOutput(output: string, maxLength = 160): string {
+  let text = output.replace(/<think>[\s\S]*?(<\/think>|$)/gi, "").trim();
+  try {
+    const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as { description?: unknown };
+    if (typeof parsed.description === "string" && parsed.description.trim()) text = parsed.description.trim();
+  } catch {
+    // Not JSON: use the text as is.
+  }
+  text = text.replace(/\s+/g, " ");
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text || "(empty reply)";
+}
+
 function toBool(value: unknown): boolean {
   if (typeof value === "string") return value.trim().toLowerCase() === "true";
   return value === true;

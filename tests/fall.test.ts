@@ -69,6 +69,13 @@ describe("FallDetector", () => {
     expect(events.map((e) => e.kind)).toEqual(["possible_fall", "fall_confirmed", "recovered"]);
   });
 
+  it("counts someone standing as up even when the model says on_floor", () => {
+    // Nemotron Omni answers on_floor=true for "standing upright on the floor".
+    const standingOnFloor: FrameVerdict = { ...standing, on_floor: true };
+    const events = run([...repeat(fallen, 6), ...repeat(standingOnFloor, 3)]);
+    expect(events.map((e) => e.kind)).toEqual(["possible_fall", "fall_confirmed", "recovered"]);
+  });
+
   it("needs several upright frames to recover, not one", () => {
     const events = run([...repeat(fallen, 6), standing, fallen, standing]);
     expect(events.map((e) => e.kind)).toEqual(["possible_fall", "fall_confirmed"]);

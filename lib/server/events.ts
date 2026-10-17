@@ -24,6 +24,7 @@ export class EventLog {
     message: string;
     level?: LogLevel;
     source?: string | null;
+    camera?: string | null;
     snapshot?: string | null;
     data?: Record<string, unknown> | null;
   }): LogEntry {
@@ -33,6 +34,7 @@ export class EventLog {
       level: entry.level ?? "info",
       kind: entry.kind,
       source: entry.source ?? null,
+      camera: entry.camera ?? null,
       message: entry.message,
       snapshot: entry.snapshot ?? null,
       data: entry.data ?? null,
@@ -63,7 +65,8 @@ export class EventLog {
     const lines = fs.readFileSync(this.file, "utf8").split("\n").filter(Boolean);
     for (const line of lines.slice(-MAX_IN_MEMORY)) {
       try {
-        this.entries.push(JSON.parse(line) as LogEntry);
+        const entry = JSON.parse(line) as LogEntry;
+        this.entries.push({ ...entry, camera: entry.camera ?? null }); // older entries have no camera
       } catch {
         // Skip a partially written line.
       }

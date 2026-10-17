@@ -9,7 +9,10 @@
     "lint": "eslint",
     "test": "vitest run",
     "typecheck": "next typegen && tsc --noEmit",
-    "mock": "node scripts/mock-nemotron.mjs"
+    "mock": "node scripts/mock-nemotron.mjs",
+    "calls:serve": ".venv/bin/python -m sentry_calls serve",
+    "calls:tunnel": "ngrok http 5050 --url=gyration-sandworm-ultra.ngrok-free.dev",
+    "calls:history": ".venv/bin/python -m sentry_calls history"
   },
   "dependencies": {
     "next": "16.4.2",
@@ -18,13 +21,11 @@
     "server-only": "^0.0.1"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
-    "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^3.2.7"
   }

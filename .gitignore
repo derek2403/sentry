@@ -50,3 +50,7 @@ next-env.d.ts
 
 # sentry: local event log, snapshots and uploads (contain footage of people)
 /data/
+
+# camera clips for the dashboard (never commit recordings)
+/public/videos/*
+!/public/videos/README.md
