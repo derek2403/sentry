@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentry Cameras</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="screen" id="screen">
+    <div class="feeds" id="feeds"></div>
+
+    <div class="empty" id="empty" hidden>
+      <p class="empty-title" id="emptyTitle">No video yet</p>
+      <p class="empty-hint" id="emptyHint"></p>
+      <label class="empty-btn" id="fileBtn">Choose a video<input type="file" id="fileInput" accept="video/*" hidden></label>
+      <button class="empty-btn" id="webcamBtn" type="button" hidden>Turn on camera</button>
+    </div>
+
+    <div class="switch-flash" id="flash"></div>
+    <span class="rec" aria-hidden="true"></span>
+
+    <aside class="ailog" id="aiLog" aria-label="AI log">
+      <header class="ailog-head">
+        <div>
+          <h2>AI log</h2>
+          <p class="ailog-status" id="aiLogStatus" aria-live="polite"></p>
+        </div>
+        <button class="panel-min" id="aiLogMin" type="button" aria-label="Minimise AI log" title="Minimise">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <p class="ailog-note" id="aiLogNote" hidden></p>
+      <ol class="ailog-list" id="aiLogList"></ol>
+    </aside>
+    <button class="ailog-pill" id="aiLogPill" type="button" hidden>
+      <span class="ailog-dot" id="aiLogDot"></span>AI log
+    </button>
+
+    <section class="map" id="map" aria-label="Camera map">
+      <div class="map-head">
+        <h1 class="room-name" id="roomName"></h1>
+        <button class="panel-min" id="mapMin" type="button" aria-label="Minimise map" title="Minimise">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <button class="room-alert" id="roomAlert" type="button" hidden></button>
+      <svg id="mapSvg" viewBox="0 0 640 430"></svg>
+    </section>
+    <button class="map-pill" id="mapPill" type="button" hidden>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M7 2.5v6h7.5M7 8.5v5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+      <span id="mapPillLabel"></span>
+    </button>
+  </main>
+
+  <script src="config.js"></script>
+  <script src="panels.js"></script>
+  <script src="app.js"></script>
+  <script src="ai-log.js"></script>
+</body>
+</html>

@@ -1,0 +1,376 @@
+:root {
+  --paper: #eef2f4;
+  --ink: #16324c;
+  --ink-2: #5a6b7c;
+  --signal: #1e5eff;
+  --alert: #e0261c;
+  --ok: #13955a;
+  --warn: #c98100;
+  --font: "Bahnschrift", "DIN Alternate", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body { height: 100%; margin: 0; }
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 16px/1.4 var(--font);
+  overflow: hidden;
+}
+
+:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+
+.screen { position: fixed; inset: 0; }
+
+/* Every camera keeps playing underneath; only the selected one is shown. */
+.feeds video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  visibility: hidden;
+  will-change: transform;
+}
+.feeds video.is-ptz { transform: none !important; }
+.feeds video.is-active { visibility: visible; }
+
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  text-align: center;
+  background:
+    linear-gradient(#d7e0e7 1px, transparent 1px) 0 0 / 32px 32px,
+    linear-gradient(90deg, #d7e0e7 1px, transparent 1px) 0 0 / 32px 32px,
+    var(--paper);
+}
+.empty[hidden] { display: none; }
+/* Keep the message clear of the map on wide screens. */
+@media (min-width: 900px) {
+  .empty { padding-right: 560px; }
+}
+.empty-title { margin: 0; font-size: 28px; font-weight: 700; }
+.empty-hint { margin: 0; color: var(--ink-2); }
+.empty-hint code { font-family: "Cascadia Mono", Consolas, monospace; color: var(--ink); }
+.empty-btn[hidden] { display: none; }
+.empty-btn {
+  margin-top: 10px;
+  font: inherit;
+  color: inherit;
+  padding: 8px 16px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+.empty-btn:hover { background: var(--ink); color: #fff; }
+
+.screen.is-drop::after {
+  content: "Drop to play on this camera";
+  position: absolute;
+  inset: 12px;
+  display: grid;
+  place-items: center;
+  border: 3px dashed var(--signal);
+  border-radius: 8px;
+  background: rgb(30 94 255 / 0.12);
+  color: var(--signal);
+  font-size: 24px;
+  font-weight: 700;
+}
+
+/* Quick blink when switching cameras, like a CCTV monitor changing channel. */
+.switch-flash {
+  position: absolute;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.switch-flash.is-on { animation: flash 220ms ease-out; }
+@keyframes flash { from { opacity: 0.85; } to { opacity: 0; } }
+
+.rec {
+  position: absolute;
+  top: 40px;
+  left: 48px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #ff1a1a;
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 0.7);
+  animation: rec 1s steps(1) infinite;
+}
+@keyframes rec { 50% { opacity: 0; } }
+
+/* ---------- AI log ---------- */
+
+.ailog {
+  position: absolute;
+  z-index: 2;
+  top: 112px;
+  left: 32px;
+  display: flex;
+  flex-direction: column;
+  width: min(380px, calc(100vw - 32px));
+  height: min(560px, calc(100vh - 140px));
+  min-width: 260px;
+  min-height: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  resize: both;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.8);
+  backdrop-filter: blur(6px);
+  box-shadow: 0 4px 24px rgb(22 50 76 / 0.18);
+  overflow: hidden;
+}
+.ailog[hidden] { display: none; }
+
+.ailog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 14px 10px 16px;
+  border-bottom: 2px solid var(--ink);
+  user-select: none;
+  cursor: grab;
+  touch-action: none;
+}
+.ailog.is-dragging { box-shadow: 0 10px 36px rgb(22 50 76 / 0.3); }
+.ailog.is-dragging .ailog-head { cursor: grabbing; }
+.ailog-head h2 { margin: 0; font-size: 22px; font-weight: 700; }
+.ailog-status { margin: 0; font-size: 14px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.panel-min {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--ink);
+  cursor: pointer;
+}
+.panel-min svg { width: 16px; height: 16px; }
+.panel-min:hover { background: var(--ink); color: #fff; }
+
+.ailog-note {
+  margin: 0;
+  padding: 8px 16px;
+  background: #fff4dc;
+  color: #7a5200;
+  font-size: 13px;
+}
+.ailog-note[hidden] { display: none; }
+
+.ailog-list {
+  flex: 1;
+  margin: 0;
+  padding: 6px 8px 10px;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.log-empty { padding: 12px 8px; color: var(--ink-2); font-size: 14px; }
+
+.log-entry {
+  --tone: var(--ok);
+  padding: 9px 10px 9px 12px;
+  border-left: 4px solid var(--tone);
+  border-radius: 2px;
+  cursor: pointer;
+}
+.log-entry + .log-entry { margin-top: 6px; }
+.log-entry:hover { background: rgb(22 50 76 / 0.05); }
+.log-entry:first-child { animation: entry-in 300ms ease-out; }
+.log-entry[data-status="watch"] { --tone: var(--warn); }
+.log-entry[data-status="emergency"] { --tone: var(--alert); background: #fde9e7; }
+.log-entry[data-status="error"] { --tone: var(--ink-2); }
+
+.le-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.le-head time { font-weight: 700; font-variant-numeric: tabular-nums; }
+.le-cam { color: var(--ink-2); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.le-tag {
+  flex-shrink: 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--tone);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+.log-entry[data-sample] { --tone: #b8892a; }
+.log-entry[data-sample] p { color: var(--ink-2); font-style: italic; }
+.le-event { display: block; margin-top: 3px; color: var(--alert); }
+.log-entry p { margin: 3px 0 0; font-size: 15px; line-height: 1.4; }
+.le-meta { margin-top: 3px; font-size: 12px; color: var(--ink-2); }
+
+@keyframes entry-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+.ailog-pill {
+  position: absolute;
+  z-index: 2;
+  top: 112px;
+  left: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: 700 16px var(--font);
+  box-shadow: 0 4px 16px rgb(22 50 76 / 0.18);
+  cursor: pointer;
+}
+.ailog-pill[hidden] { display: none; }
+.ailog-pill:hover { background: #dfe8ff; }
+
+.ailog-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
+.ailog-dot[data-status="normal"] { background: var(--ok); }
+.ailog-dot[data-status="watch"] { background: var(--warn); }
+.ailog-dot[data-status="emergency"] { background: var(--alert); animation: rec 1s steps(1) infinite; }
+.ailog-dot[data-status="sample"] { background: var(--warn); }
+
+/* ---------- Camera map ---------- */
+
+.map {
+  position: absolute;
+  right: 32px;
+  bottom: 28px;
+  width: min(500px, calc(100vw - 32px));
+  user-select: none;
+}
+.map[hidden] { display: none; }
+
+.map-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+.map-head .room-name { margin-bottom: 0; }
+
+.map-pill {
+  position: absolute;
+  right: 32px;
+  bottom: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ink);
+  font: 700 16px var(--font);
+  box-shadow: 0 4px 16px rgb(22 50 76 / 0.18);
+  cursor: pointer;
+}
+.map-pill[hidden] { display: none; }
+.map-pill svg { width: 16px; height: 16px; }
+.map-pill:hover { background: #dfe8ff; }
+.map-pill.is-alert { border-color: var(--alert); background: var(--alert); color: #fff; animation: pill-alert 1s steps(1) infinite; }
+@keyframes pill-alert { 50% { background: #fff; color: var(--alert); } }
+
+.room-name {
+  margin: 0 0 2px 6px;
+  font-size: clamp(28px, 3.4vw, 44px);
+  font-weight: 700;
+  color: var(--ink);
+  -webkit-text-stroke: 6px #fff;
+  paint-order: stroke fill;
+}
+
+.room-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px 6px;
+  padding: 4px 6px 4px 12px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--alert);
+  color: #fff;
+  font: 700 16px var(--font);
+  cursor: pointer;
+}
+.ra-ok {
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: #fff;
+  color: var(--alert);
+  font-size: 14px;
+}
+.room-alert:hover .ra-ok { background: #ffe3e0; }
+.room-alert[hidden] { display: none; }
+
+#mapSvg {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.72);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 24px rgb(22 50 76 / 0.18);
+}
+
+.m-room { fill: none; stroke: var(--ink); stroke-width: 3; }
+.m-room-label { font: 600 15px var(--font); fill: var(--ink-2); }
+
+.m-you rect { fill: #fff; stroke: var(--ink); stroke-width: 2.5; }
+.m-you text { font: 700 15px var(--font); fill: var(--ink); }
+.m-you .m-you-dot { fill: var(--ink); stroke: none; }
+
+.m-cam { cursor: pointer; }
+.m-cam:focus { outline: none; }
+.m-cam rect { fill: #fff; stroke: var(--ink); stroke-width: 3; }
+.m-cam text { font: 700 19px var(--font); fill: var(--ink); }
+.m-cam:hover rect { fill: #dfe8ff; }
+.m-cam:focus-visible rect { stroke: var(--signal); stroke-width: 4; }
+
+.m-cam.is-empty rect { stroke-dasharray: 5 3; }
+
+.m-cam.is-active rect { fill: var(--signal); stroke: var(--signal); }
+.m-cam.is-active text { fill: #fff; }
+
+.m-cam.is-alert rect { fill: var(--alert); stroke: var(--alert); animation: chip-alert 0.9s steps(1) infinite; }
+.m-cam.is-alert text { fill: #fff; }
+@keyframes chip-alert { 50% { fill: #fff; } }
+.m-cam.is-alert text { animation: chip-alert-text 0.9s steps(1) infinite; }
+@keyframes chip-alert-text { 50% { fill: var(--alert); } }
+
+/* Keep the log above the map when the screen is too narrow for both side by side. */
+@media (max-width: 960px) {
+  .ailog { bottom: auto; max-height: calc(100vh - 112px - 420px); min-height: 200px; }
+}
+
+@media (max-width: 640px) {
+  .rec { top: 20px; left: 20px; width: 28px; height: 28px; }
+  .map { right: 16px; bottom: 16px; }
+  .ailog, .ailog-pill { top: 64px; left: 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; }
+}
