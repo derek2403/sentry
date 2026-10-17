@@ -1,4 +1,5 @@
 """Twilio callbacks only. Calls are started locally through the CLI."""
+import json
 import os
 import re
 
@@ -9,6 +10,7 @@ from twilio.twiml.voice_response import VoiceResponse
 
 from .core import database, decision, event, validate_destination
 from .scenario import explanation, GUIDANCE, QUESTION, summary
+from .script import spoken_intro, spoken_summary
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024
@@ -63,15 +65,28 @@ def owned(db, run, leg="contact"):
     return row
 
 
+def stored_script(row):
+    """The Nemotron-written script saved by the `call` command, or None for the fixed scenario."""
+    try:
+        return json.loads(row["script"]) if row["script"] else None
+    except (json.JSONDecodeError, IndexError, KeyError):
+        return None
+
+
 @app.post("/voice/<run>/intro")
 def intro(run):
     with database() as db:
         row = owned(db, run)
         event(db, run, "contact_answered_script_requested")
+    script = stored_script(row)
     response = VoiceResponse()
-    response.say(explanation(row["occurred_at"]), language="en-US")
-    response.say(GUIDANCE, language="en-US")
-    gather(response, run, 1)
+    if script:
+        response.say(spoken_intro(script), language="en-US")
+        response.say(script["guidance"], language="en-US")
+    else:
+        response.say(explanation(row["occurred_at"]), language="en-US")
+        response.say(GUIDANCE, language="en-US")
+    gather(response, run, 1)  # the yes/no question is always the fixed one
     return xml(response)
 
 
@@ -127,14 +142,15 @@ def dispatch_escalation(run):
         if not changed:
             return
         event(db, run, "demo_escalation_submitting")
-        occurred_at = db.execute("SELECT occurred_at FROM runs WHERE id=?", (run,)).fetchone()[0]
+        row = db.execute("SELECT occurred_at, script FROM runs WHERE id=?", (run,)).fetchone()
     try:
         destination = validate_destination(os.getenv("DEMO_ESCALATION_PHONE", ""))
-        script = VoiceResponse()
-        script.say(summary(occurred_at), language="en-US")
-        script.hangup()
+        written = stored_script(row)
+        twiml = VoiceResponse()
+        twiml.say(spoken_summary(written) if written else summary(row["occurred_at"]), language="en-US")
+        twiml.hangup()
         call = client().calls.create(
-            to=destination, from_=os.environ["TWILIO_FROM_NUMBER"], twiml=str(script),
+            to=destination, from_=os.environ["TWILIO_FROM_NUMBER"], twiml=str(twiml),
             status_callback=f"{base_url()}/voice/{run}/status/escalation",
             status_callback_event=["completed"], timeout=25,
         )

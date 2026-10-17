@@ -70,6 +70,7 @@ export interface Alert {
   location: string;
   camera: string | null;
   type: EmergencyType;
+  description: string; // what Nemotron saw in the frame that confirmed it
   message: string;
   snapshot: string | null;
   videoTime: number;

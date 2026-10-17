@@ -53,10 +53,32 @@ export async function onFallConfirmed(alert: Alert, log: EventLog, isStillActive
       kind: "workflow",
       level: "warning",
       ...where,
-      message: mode === "on" ? "Calling the emergency contact (sentry_calls)" : "Simulating the emergency call (EMERGENCY_CALLS=simulate, no phone call)",
+      message:
+        mode === "on"
+          ? "Nemotron is writing the call script, then Sentry calls the emergency contact"
+          : "Simulating the emergency call (EMERGENCY_CALLS=simulate, no phone call)",
     });
-    const result = await runCalls(command);
+    // What the call is about. Nemotron writes the call from this (sentry_calls/script.py).
+    const incident = {
+      type: alert.type,
+      description: alert.description,
+      location: alert.location.replace(/^\d+[A-Z]?\s+/, ""), // "1A Living room" -> "Living room"
+      detected_at: new Date(alert.ts).toISOString(),
+    };
+    const result = await runCalls(command, JSON.stringify(incident));
     const output = (result.stdout || result.stderr).trim();
+    const script = parseScript(result.stdout);
+    if (script) {
+      log.add({
+        kind: "workflow",
+        ...where,
+        message:
+          script.source === "nemotron"
+            ? `Nemotron wrote the call: "${script.intro} ${script.guidance}"`
+            : `Fixed call script used (${script.note ?? "Nemotron unavailable"}): "${script.intro}"`,
+        data: { script },
+      });
+    }
     if (result.code !== 0) {
       throw new Error(output.split("\n").at(-1) || `sentry_calls exited with code ${result.code}`);
     }
@@ -100,11 +122,31 @@ function pythonPath(): string {
   return fs.existsSync(venv) ? venv : "python3";
 }
 
-function runCalls(command: "call" | "simulate"): Promise<{ code: number | null; stdout: string; stderr: string }> {
+interface CallScript {
+  intro: string;
+  guidance: string;
+  summary: string;
+  source: "nemotron" | "template";
+  note?: string;
+}
+
+/** The `script: {...}` line sentry_calls prints with the script it will speak. */
+function parseScript(stdout: string): CallScript | null {
+  const line = stdout.split("\n").find((l) => l.startsWith("script: "));
+  if (!line) return null;
+  try {
+    return JSON.parse(line.slice("script: ".length)) as CallScript;
+  } catch {
+    return null;
+  }
+}
+
+function runCalls(command: "call" | "simulate", incident: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    // The child gets this server's environment, so the Twilio and number settings can live
-    // in .env or .env.local; sentry_calls also loads .env itself.
-    const child = spawn(pythonPath(), ["-m", "sentry_calls", command], { cwd: process.cwd(), env: process.env });
+    // The child gets this server's environment, so the Twilio, number and Nemotron (LLM_*)
+    // settings can live in .env or .env.local; sentry_calls also loads .env itself.
+    // Arguments are passed as an array (no shell), so the incident text can't inject commands.
+    const child = spawn(pythonPath(), ["-m", "sentry_calls", command, "--incident", incident], { cwd: process.cwd(), env: process.env });
     let stdout = "";
     let stderr = "";
     const timer = setTimeout(() => child.kill("SIGTERM"), config.calls.timeoutMs);

@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import uuid
 from datetime import datetime, timezone
@@ -7,21 +8,42 @@ from dotenv import load_dotenv
 
 from .core import database, decision, event, validate_destination
 from .scenario import explanation, GUIDANCE, QUESTION, summary
+from .script import generate, spoken_intro, spoken_summary
+
+
+def incident_script(raw):
+    """Script for --incident (JSON from Sentry), written by Nemotron; None without an incident."""
+    if not raw:
+        return None
+    try:
+        incident = json.loads(raw)
+    except json.JSONDecodeError:
+        raise ValueError("--incident must be JSON") from None
+    script = generate(incident)
+    # One machine-readable line so Sentry can show the script in its AI log.
+    print("script: " + json.dumps(script))
+    return script
 
 
 def main():
     load_dotenv()
-    parser = argparse.ArgumentParser(description="Hardcoded Sentry phone demo; no incident API.")
+    parser = argparse.ArgumentParser(description="Sentry phone call demo.")
     parser.add_argument("command", choices=["simulate", "serve", "call", "history"])
     parser.add_argument("--reply", default="yes", choices=["yes", "no", "unclear"], help="Simulation reply; no interactive input required")
+    parser.add_argument("--incident", help='JSON from Sentry: {"type", "description", "location", "detected_at"}; Nemotron writes the call from it')
     args = parser.parse_args()
     if args.command == "simulate":
-        print("SIMULATION ONLY — no phone or AI requests\n")
-        print(explanation(), "\n\n", GUIDANCE, "\n\n", QUESTION, sep="")
+        try:
+            script = incident_script(args.incident)
+        except ValueError as error:
+            parser.exit(2, f"{error}\n")
+        print("SIMULATION ONLY — no phone call" + (f" (script: {script['source']})" if script else ", no AI requests") + "\n")
+        intro, guidance = (spoken_intro(script), script["guidance"]) if script else (explanation(), GUIDANCE)
+        print(intro, "\n\n", guidance, "\n\n", QUESTION, sep="")
         result = decision(digits={"yes": "1", "no": "2", "unclear": "9"}[args.reply])
         print(f"\nSimulated recipient: {args.reply}")
         if result == "yes":
-            print("\nSIMULATED second call (only if a teammate number is configured):\n" + summary())
+            print("\nSIMULATED second call (only if a teammate number is configured):\n" + (spoken_summary(script) if script else summary()))
         else:
             print("No second call. Unclear replies get at most three attempts in connected mode.")
         return
@@ -42,9 +64,14 @@ def main():
         contact = validate_destination(os.getenv("EMERGENCY_CONTACT_PHONE", ""))
         if os.getenv("DEMO_ESCALATION_PHONE"):
             validate_destination(os.environ["DEMO_ESCALATION_PHONE"])
+        script = incident_script(args.incident)  # written before dialling, so the call never waits on the model
         run = uuid.uuid4().hex
         with database() as db:
-            db.execute("INSERT INTO runs(id,occurred_at) VALUES (?,?)", (run, datetime.now(timezone.utc).isoformat()))
+            db.execute(
+                "INSERT INTO runs(id,occurred_at,script) VALUES (?,?,?)",
+                (run, datetime.now(timezone.utc).isoformat(), json.dumps(script) if script else None),
+            )
+            event(db, run, f"script_{script['source']}" if script else "script_fixed")
             event(db, run, "contact_submitting")
         try:
             call = client().calls.create(

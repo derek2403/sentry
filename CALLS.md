@@ -1,9 +1,29 @@
-# Sentry hardcoded call demo
+# Sentry call demo
 
-This standalone slice implements the phone scenario from demo.md. No cameras,
-Telegram, dashboard, incident input API, or acknowledgement timer are needed.
-The fictional household, incident, fixed checklist, and spoken summary live in
+This slice implements the phone scenario from demo.md. Run on its own, it uses
+the fictional household, incident, checklist and spoken summary in
 `sentry_calls/scenario.py`. Phone numbers can be supplied later in `.env`.
+
+## Calls written by Nemotron
+
+When the Sentry dashboard confirms an emergency, it runs
+`python -m sentry_calls call --incident '{"type": ..., "description": ..., "location": ..., "detected_at": ...}'`.
+Before dialling, `sentry_calls/script.py` asks Nemotron (the same `LLM_*` endpoint) to write
+the call from those facts: what was detected, where and when; what to do now; and the summary
+for the escalation call. `simulate --incident '...'` prints the same script without calling.
+
+The model only writes words, inside fixed safety rails:
+
+- The guidance may use only steps from the fixed checklist for that emergency type
+  (`CHECKLISTS` in `script.py`; fall, fire or smoke, water leak, medical, child in danger,
+  intruder, other), keeping each step's meaning. Checklists need review before production use.
+- The opening ("this is a Sentry home safety demonstration"), the yes/no question, the
+  disclaimer on the escalation call and every phone number stay fixed and never come from the model.
+- Its text is cleaned for text-to-speech (no markup, no runs of three or more digits, so no
+  phone or emergency numbers), and each part is length-limited.
+- If Nemotron is unavailable or replies with anything unusable, a fixed script for the
+  incident type is used instead, so the call still happens. `history` shows `script_nemotron`
+  or `script_template` for each run.
 
 ## Setup and simulation
 
@@ -74,8 +94,9 @@ Clear high-confidence yes/no speech and keypad responses work without AI.
 Longer speech is classified by Nemotron using a JSON-only prompt and validated
 response. An AI-interpreted yes requires further confirmation. Missing/low
 speech confidence, invalid JSON, or an inference error leads to clarification.
-Scripts and guidance stay fixed; the model cannot choose phone numbers or invent
-medical advice. Blank endpoint/model settings disable AI classification.
+The model cannot choose phone numbers, and call guidance comes only from the fixed
+checklists (see "Calls written by Nemotron"). Blank endpoint/model settings disable AI
+classification and AI-written scripts.
 
 Reply reasoning runs on your Spark. Twilio still performs speech recognition and
 text-to-speech and receives spoken incident text; the complete phone pipeline is

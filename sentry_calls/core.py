@@ -57,8 +57,11 @@ def database():
     try:
         db.row_factory = sqlite3.Row
         db.execute("CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, contact_sid TEXT, escalation_sid TEXT, escalation_state TEXT, decision TEXT)")
-        if "occurred_at" not in {row[1] for row in db.execute("PRAGMA table_info(runs)")}:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(runs)")}
+        if "occurred_at" not in columns:
             db.execute("ALTER TABLE runs ADD COLUMN occurred_at TEXT")
+        if "script" not in columns:  # JSON from script.generate(); NULL = the fixed scenario
+            db.execute("ALTER TABLE runs ADD COLUMN script TEXT")
         db.execute("CREATE TABLE IF NOT EXISTS replies (run TEXT, attempt INTEGER, xml TEXT, PRIMARY KEY(run, attempt))")
         db.execute("CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, run TEXT, at TEXT DEFAULT CURRENT_TIMESTAMP, event TEXT)")
         db.commit()

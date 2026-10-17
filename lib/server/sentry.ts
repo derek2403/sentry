@@ -165,7 +165,7 @@ class Sentry {
         } else if (event.kind === "recovered") {
           this.log.add({ kind: event.kind, source, camera, data, message: `Resolved (${what}): ${detail}.` });
         } else if (event.kind === "fall_confirmed") {
-          this.raiseAlert(session.id, source, camera, event.type, t, detail, imageDataUrl);
+          this.raiseAlert(session.id, source, camera, event.type, t, detail, verdict.description, imageDataUrl);
         }
       }
 
@@ -219,6 +219,7 @@ class Sentry {
     type: EmergencyType,
     t: number,
     detail: string,
+    description: string,
     imageDataUrl: string,
   ): void {
     const what = emergencyLabel(type);
@@ -238,7 +239,7 @@ class Sentry {
       data: { t, type },
       message: `${what.toUpperCase()} DETECTED in ${source}: ${detail}`,
     });
-    const alert: Alert = { eventId: entry.id, ts: entry.ts, location: source, camera, type, message: entry.message, snapshot, videoTime: t };
+    const alert: Alert = { eventId: entry.id, ts: entry.ts, location: source, camera, type, description, message: entry.message, snapshot, videoTime: t };
     this.s.alert = alert;
     this.s.alertSession = sessionId;
     // Don't hold up the frame response while the workflow runs.

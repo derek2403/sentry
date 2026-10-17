@@ -45,10 +45,10 @@ Normal life is not an emergency: sleeping, lying on the sofa, sitting on the flo
 
 ### Automatic emergency call
 
-When Sentry confirms an emergency, it **phones the emergency contact straight away**. A fall is urgent, so Sentry doesn't send a text message that might sit unread. The emergency contact is a person the household chose, such as a family member or neighbour. On the call, Sentry's voice agent (Nemotron, running on the ATOM):
+When Sentry confirms an emergency, it **phones the emergency contact straight away**. An emergency is urgent, so Sentry doesn't send a text message that might sit unread. The emergency contact is a person the household chose, such as a family member or neighbour. Before dialling, Nemotron on the ATOM writes the call from what it saw (the emergency type, its description of the frame, the room and the time). On the call, Sentry:
 
 1. **explains what happened**: what was detected, where, and when;
-2. **tells the contact what to do right now**, using a fixed first-aid checklist so it doesn't invent medical advice;
+2. **tells the contact what to do right now**, choosing only from the fixed checklist for that emergency type (a fall, a fire, a water leak, ...) so it never invents advice;
 3. **asks: "Do you want me to call emergency services?"** If the contact says yes (or presses 1), Sentry calls emergency services and reads out an incident summary.
 
 ```mermaid
@@ -124,7 +124,7 @@ The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it 
 | App                   | Next.js 16 (App Router), TypeScript: camera dashboard and API routes             |
 | Frame capture         | In the dashboard: `<video>` + canvas, for each camera's clip or a webcam         |
 | Storage               | Local event log (JSON lines) and fall snapshots in `data/` on the ATOM           |
-| Emergency calls       | `sentry_calls` (Python, Flask): Twilio voice call with a fixed script; started locally when a fall is confirmed (see [CALLS.md](CALLS.md)) |
+| Emergency calls       | `sentry_calls` (Python, Flask): Twilio voice call, script written by Nemotron within fixed safety rails; started locally when an emergency is confirmed (see [CALLS.md](CALLS.md)) |
 
 > **Model notes**
 > - Frame-by-frame analysis needs a model that accepts **image input**. On the ACE 2026 ATOM that is **Nemotron 3 Nano Omni** (`omni`, port 9001). The briefing's baseline, Nemotron 3.5 Lightning (`lightning`, port 9000), and Nemotron 3 Nano (`nano`, port 9006) are text-only and reject images. Set `LLM_BASE_URL` and `LLM_MODEL=omni` in `.env.local`.
