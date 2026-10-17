@@ -37,7 +37,8 @@ export function isDown(v: FrameVerdict, minConfidence: number): boolean {
 }
 
 export function isUp(v: FrameVerdict): boolean {
-  return v.person_visible && !v.fall_detected && !v.on_floor && (v.posture === "standing" || v.posture === "walking");
+  // on_floor is ignored here: the model sets it for people standing on the floor too.
+  return v.person_visible && !v.fall_detected && (v.posture === "standing" || v.posture === "walking");
 }
 
 /** A clear frame that contradicts "they are down": sitting up, standing or walking. */

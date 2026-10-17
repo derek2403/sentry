@@ -1,6 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { parseVerdict } from "../lib/server/verdict";
+import { parseVerdict, summariseOutput } from "../lib/server/verdict";
+
+describe("summariseOutput", () => {
+  it("uses the description of a JSON reply", () => {
+    expect(summariseOutput('{"fall_detected":true,"description":"Man lying on the floor."}')).toBe("Man lying on the floor.");
+  });
+
+  it("falls back to the plain text, trimmed and shortened", () => {
+    expect(summariseOutput("  The person\n is   sitting.  ")).toBe("The person is sitting.");
+    expect(summariseOutput("x".repeat(300))).toHaveLength(160);
+  });
+
+  it("drops reasoning blocks", () => {
+    expect(summariseOutput("<think>hmm</think> All clear.")).toBe("All clear.");
+  });
+});
 
 describe("parseVerdict", () => {
   it("parses a plain JSON reply", () => {

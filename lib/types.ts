@@ -38,16 +38,29 @@ export interface LogEntry {
   ts: number; // unix ms
   level: LogLevel;
   kind: LogKind;
-  source: string | null;
+  source: string | null; // display name, e.g. "1A Living room"
+  camera: string | null; // camera id, e.g. "living"
   message: string;
   snapshot: string | null; // URL of a locally stored frame
   data: Record<string, unknown> | null;
+}
+
+/** `data` of a Backlog entry with kind "frame": one LLM answer and whether it saw a fall. */
+export interface LlmLogData {
+  fall: boolean;
+  output: string; // the model's reply, exactly as returned
+  t: number | null; // seconds into the video / camera session
+  confidence: number | null;
+  model: string | null;
+  latencyMs: number | null;
+  verdict: FrameVerdict | null;
 }
 
 export interface Alert {
   eventId: number;
   ts: number;
   location: string;
+  camera: string | null;
   message: string;
   snapshot: string | null;
   videoTime: number;
@@ -58,7 +71,8 @@ export type SourceKind = "upload" | "camera";
 export interface SessionInfo {
   id: string;
   source: SourceKind;
-  name: string;
+  name: string; // display name, e.g. "1A Living room"
+  camera: string | null; // camera id, e.g. "living"
 }
 
 export interface FrameResult {

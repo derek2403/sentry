@@ -15,6 +15,7 @@ export async function onFallConfirmed(alert: Alert, log: EventLog): Promise<void
     kind: "workflow",
     level: "warning",
     source: alert.location,
+    camera: alert.camera,
     message: "Emergency workflow triggered (Telegram alert and emergency call not connected yet)",
     data: { eventId: alert.eventId },
   });

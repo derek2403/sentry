@@ -4,11 +4,12 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import type { Alert, FrameResult, FrameVerdict, SessionInfo, SourceKind } from "../types";
+import type { Alert, FrameResult, FrameVerdict, LlmLogData, LogEntry, SessionInfo, SourceKind } from "../types";
 import { config } from "./config";
 import { EventLog } from "./events";
 import { FallDetector } from "./fall";
 import { analyseFrame } from "./nemotron";
+import { summariseOutput } from "./verdict";
 import { onFallConfirmed } from "./workflow";
 
 const SESSION_IDLE_MS = 5 * 60_000;
@@ -56,17 +57,19 @@ class Sentry {
     const alert = this.alert;
     if (alert) {
       this.alert = null;
-      this.log.add({ kind: "alert", source: alert.location, message: "Alert acknowledged on the dashboard" });
+      this.log.add({ kind: "alert", source: alert.location, camera: alert.camera, message: "Alert marked OK on the dashboard" });
     }
     return alert;
   }
 
-  startSession(source: SourceKind, name: string): SessionInfo {
+  /** Start analysing one camera feed. `name` is its display name, `camera` its id. */
+  startSession(source: SourceKind, name: string, camera: string | null): SessionInfo {
     this.pruneIdle();
     const session: Session = {
       id: randomUUID(),
       source,
       name,
+      camera,
       detector: new FallDetector(config.fall),
       previous: null,
       frames: 0,
@@ -76,12 +79,8 @@ class Sentry {
       lastSeen: Date.now(),
     };
     this.sessions.set(session.id, session);
-    this.log.add({
-      kind: "video",
-      source: this.location(session),
-      message: source === "upload" ? `Started analysing uploaded video "${name}"` : `Live camera "${name}" connected`,
-    });
-    return { id: session.id, source, name };
+    this.log.add({ kind: "video", source: name, camera, message: `Started watching ${name}` });
+    return { id: session.id, source, name, camera };
   }
 
   endSession(id: string, reason: string): void {
@@ -91,8 +90,9 @@ class Sentry {
     this.sessions.delete(id);
     this.log.add({
       kind: "video",
-      source: this.location(session),
-      message: `${session.source === "upload" ? `Finished "${session.name}"` : "Camera disconnected"} (${reason}). ${session.frames} frames analysed.`,
+      source: session.name,
+      camera: session.camera,
+      message: `Stopped watching ${session.name} (${reason}). ${session.frames} frames analysed.`,
     });
   }
 
@@ -102,18 +102,20 @@ class Sentry {
     if (session.busy) throw new HttpError(409, "Previous frame is still being analysed");
     session.busy = true;
     session.lastSeen = Date.now();
-    const location = this.location(session);
+    const { name: source, camera } = session;
     const started = performance.now();
 
     try {
       let verdict: FrameVerdict;
+      let output: string;
+      let model: string;
       try {
-        verdict = await analyseFrame({ imageDataUrl, t, source: location, previous: session.previous });
+        ({ verdict, output, model } = await analyseFrame({ imageDataUrl, t, source, previous: session.previous }));
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         if (!session.failing) {
           // Log once per outage, not on every frame.
-          this.log.add({ kind: "error", level: "error", source: location, message: `Nemotron analysis failed: ${message}` });
+          this.log.add({ kind: "error", level: "error", source, camera, message: `Nemotron analysis failed: ${message}` });
           session.failing = true;
         }
         return { verdict: null, state: session.detector.state, events: [], latencyMs: Math.round(performance.now() - started), error: message, alert: this.alert };
@@ -123,7 +125,7 @@ class Sentry {
       }
       if (session.failing) {
         session.failing = false;
-        this.log.add({ kind: "system", source: location, message: "Nemotron analysis recovered" });
+        this.log.add({ kind: "system", source, camera, message: "Nemotron analysis recovered" });
       }
 
       const latencyMs = Math.round(performance.now() - started);
@@ -131,24 +133,19 @@ class Sentry {
       session.previous = verdict;
       const { state, events } = session.detector.update(verdict, t);
 
-      this.log.add({
-        kind: "frame",
-        source: location,
-        message: `${formatTime(t)} · ${verdict.person_visible ? verdict.posture : "no person"}${verdict.fall_detected ? " · FALL" : ""} · ${verdict.description}`,
-        data: { t, latencyMs, ...verdict },
-      });
+      this.logLlmOutput({ source, camera, output, fall: verdict.fall_detected, t, confidence: verdict.confidence, model, latencyMs, verdict });
 
       for (const event of events) {
         const data = { t, confidence: verdict.confidence };
         const detail = event.detail.replace(/[.\s]+$/, "");
         if (event.kind === "possible_fall") {
-          this.log.add({ kind: event.kind, level: "warning", source: location, data, message: `Possible fall at ${formatTime(t)}: ${detail}. Confirming with the next frames.` });
+          this.log.add({ kind: event.kind, level: "warning", source, camera, data, message: `Possible fall: ${detail}. Confirming with the next frames.` });
         } else if (event.kind === "fall_cancelled") {
-          this.log.add({ kind: event.kind, source: location, data, message: `False alarm at ${formatTime(t)}: ${detail}.` });
+          this.log.add({ kind: event.kind, source, camera, data, message: `False alarm: ${detail}.` });
         } else if (event.kind === "recovered") {
-          this.log.add({ kind: event.kind, source: location, data, message: `Recovered at ${formatTime(t)}: ${detail}.` });
+          this.log.add({ kind: event.kind, source, camera, data, message: `Recovered: ${detail}.` });
         } else if (event.kind === "fall_confirmed") {
-          this.raiseAlert(location, t, detail, imageDataUrl);
+          this.raiseAlert(source, camera, t, detail, imageDataUrl);
         }
       }
 
@@ -158,20 +155,59 @@ class Sentry {
     }
   }
 
-  private raiseAlert(location: string, t: number, detail: string, imageDataUrl: string): void {
+  /**
+   * Logs one LLM answer to the Backlog: the model's output and whether it saw a fall.
+   * Used for every analysed frame, and by POST /api/logs for LLM output from elsewhere.
+   */
+  logLlmOutput(entry: {
+    source: string | null;
+    camera?: string | null;
+    output: string;
+    fall: boolean;
+    t?: number | null;
+    confidence?: number | null;
+    model?: string | null;
+    latencyMs?: number | null;
+    verdict?: FrameVerdict | null;
+  }): LogEntry {
+    const data: LlmLogData = {
+      fall: entry.fall,
+      output: entry.output,
+      t: entry.t ?? null,
+      confidence: entry.confidence ?? null,
+      model: entry.model ?? null,
+      latencyMs: entry.latencyMs ?? null,
+      verdict: entry.verdict ?? null,
+    };
+    return this.log.add({
+      kind: "frame",
+      source: entry.source,
+      camera: entry.camera ?? null,
+      message: `${entry.fall ? "FALL" : "No fall"} · ${summariseOutput(entry.output)}`,
+      data: { ...data },
+    });
+  }
+
+  private raiseAlert(source: string, camera: string | null, t: number, detail: string, imageDataUrl: string): void {
+    if (this.alert && this.alert.camera === camera) {
+      // Same camera is already in alert and nobody has marked it OK: don't alert (or call) again.
+      this.log.add({ kind: "fall_confirmed", level: "warning", source, camera, data: { t }, message: `Still down: ${detail}. Alert already active.` });
+      return;
+    }
     const snapshot = this.saveSnapshot(imageDataUrl);
     const entry = this.log.add({
       kind: "fall_confirmed",
       level: "critical",
-      source: location,
+      source,
+      camera,
       snapshot,
       data: { t },
-      message: `FALL DETECTED in ${location} at ${formatTime(t)}: ${detail}`,
+      message: `FALL DETECTED in ${source}: ${detail}`,
     });
-    this.alert = { eventId: entry.id, ts: entry.ts, location, message: entry.message, snapshot, videoTime: t };
+    this.alert = { eventId: entry.id, ts: entry.ts, location: source, camera, message: entry.message, snapshot, videoTime: t };
     // Don't hold up the frame response while the workflow runs.
     onFallConfirmed(this.alert, this.log).catch((err) => {
-      this.log.add({ kind: "error", level: "error", source: location, message: `Emergency workflow failed: ${err instanceof Error ? err.message : String(err)}` });
+      this.log.add({ kind: "error", level: "error", source, camera, message: `Emergency workflow failed: ${err instanceof Error ? err.message : String(err)}` });
     });
   }
 
@@ -188,22 +224,12 @@ class Sentry {
     }
   }
 
-  private location(session: SessionInfo): string {
-    return session.source === "camera" ? session.name : `${config.cameraName} (uploaded video)`;
-  }
-
   private pruneIdle(): void {
     const now = Date.now();
     for (const [id, session] of this.sessions) {
       if (now - session.lastSeen > SESSION_IDLE_MS) this.endSession(id, "idle timeout");
     }
   }
-}
-
-function formatTime(t: number): string {
-  const m = Math.floor(t / 60);
-  const s = (t - m * 60).toFixed(1).padStart(4, "0");
-  return `${m}:${s}`;
 }
 
 // One instance per server process. It lives on globalThis because Next.js bundles each

@@ -1,5 +1,5 @@
-import Dashboard from "@/components/Dashboard";
+import CameraDashboard from "@/components/CameraDashboard";
 
 export default function Home() {
-  return <Dashboard />;
+  return <CameraDashboard />;
 }

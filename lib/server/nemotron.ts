@@ -86,8 +86,14 @@ export interface AnalyseInput {
   previous: FrameVerdict | null;
 }
 
-/** Sends one frame to Nemotron and returns its verdict. */
-export async function analyseFrame({ imageDataUrl, t, source, previous }: AnalyseInput): Promise<FrameVerdict> {
+export interface AnalyseResult {
+  verdict: FrameVerdict;
+  output: string; // the model's reply, exactly as returned
+  model: string;
+}
+
+/** Sends one frame to Nemotron and returns its verdict along with the raw reply. */
+export async function analyseFrame({ imageDataUrl, t, source, previous }: AnalyseInput): Promise<AnalyseResult> {
   const model = await getModelId();
   const context = previous
     ? `Previous frame: ${previous.posture}${previous.on_floor ? " on the floor" : ""}. ${previous.description}`
@@ -136,7 +142,7 @@ export async function analyseFrame({ imageDataUrl, t, source, previous }: Analys
   if (!message?.content && choice?.finish_reason === "length") {
     throw new Error("model hit LLM_MAX_TOKENS before answering (is thinking still on?)");
   }
-  return parseVerdict(content);
+  return { verdict: parseVerdict(content), output: content, model };
 }
 
 function post(body: Record<string, unknown>, withSchema: boolean): Promise<Response> {

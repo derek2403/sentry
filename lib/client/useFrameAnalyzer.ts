@@ -1,18 +1,25 @@
 "use client";
 
-import { useEffect, useRef, type RefObject } from "react";
+import { useEffect, useRef } from "react";
 
 import type { FallState, FrameResult, SessionInfo, SourceKind, StatusResponse } from "../types";
 
 export interface AnalyzerSource {
   kind: SourceKind;
-  name: string;
-  /** Changes whenever a new run should start (new upload, replay, camera reconnect). */
+  name: string; // display name, e.g. "1A Living room"
+  camera: string | null; // camera id
+  /**
+   * Treat the video as a live feed: time runs on the wall clock, and once the clip ends
+   * its last frame keeps being analysed, like a CCTV camera still watching the room.
+   */
+  live: boolean;
+  /** Changes whenever a new run should start (new video, camera switch, replay). */
   runId: number;
 }
 
 interface Options {
-  videoRef: RefObject<HTMLVideoElement | null>;
+  /** The <video> element showing this source. */
+  video: HTMLVideoElement | null;
   source: AnalyzerSource | null;
   analysis: StatusResponse["analysis"] | null;
   onResult: (result: FrameResult, t: number) => void;
@@ -31,7 +38,7 @@ const RETRY_MS = 2_000;
  * Nemotron through the Sentry API. The next frame is only sent once the
  * previous verdict is back, so the model is never flooded.
  */
-export function useFrameAnalyzer({ videoRef, source, analysis, onResult, onError, onFinished, onRestart }: Options): void {
+export function useFrameAnalyzer({ video, source, analysis, onResult, onError, onFinished, onRestart }: Options): void {
   // Keep the latest callbacks without restarting the loop.
   const callbacks = useRef({ onResult, onError, onFinished, onRestart });
   useEffect(() => {
@@ -39,7 +46,6 @@ export function useFrameAnalyzer({ videoRef, source, analysis, onResult, onError
   });
 
   useEffect(() => {
-    const video = videoRef.current;
     if (!source || !analysis || !video) return;
 
     const controller = new AbortController();
@@ -70,7 +76,7 @@ export function useFrameAnalyzer({ videoRef, source, analysis, onResult, onError
       const res = await fetch("/api/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: source.kind, name: source.name }),
+        body: JSON.stringify({ source: source.kind, name: source.name, camera: source.camera }),
         signal,
       });
       if (!res.ok) throw new Error(`Could not start a session (${res.status})`);
@@ -80,17 +86,20 @@ export function useFrameAnalyzer({ videoRef, source, analysis, onResult, onError
       let state: FallState = "monitoring";
       let endedAt: number | null = null;
       let heldFrames = 0;
-      const cameraStart = performance.now();
+      let liveStart: number | null = null; // the live clock starts at the first analysed frame
 
       while (!signal.aborted) {
         let t: number;
         let held = false; // this sample is the frozen last frame of an ended video
-        if (source.kind === "camera") {
-          if (video.readyState < 2) {
+        if (source.kind === "camera" || source.live) {
+          // A live feed is analysed while it plays, and after it ends (the last frame stays
+          // on screen, like a camera still pointing at the room). Not before it starts.
+          if (video.readyState < 2 || (video.paused && !video.ended)) {
             await sleep(100, signal);
             continue;
           }
-          t = (performance.now() - cameraStart) / 1000;
+          liveStart ??= performance.now();
+          t = (performance.now() - liveStart) / 1000;
         } else if (video.ended) {
           // The last frame stays on screen. Always analyse it at least once (the fall may
           // happen right at the end, between two samples), and keep checking it while a
@@ -178,7 +187,7 @@ export function useFrameAnalyzer({ videoRef, source, analysis, onResult, onError
       controller.abort();
       close("stopped");
     };
-  }, [videoRef, source, analysis]);
+  }, [video, source, analysis]);
 }
 
 function captureFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement, maxWidth: number): string | null {
