@@ -207,7 +207,9 @@ function toView(e: LogEntry): View {
     case "error":
       return { ...base, status: "error", tag: "Problem" };
     case "workflow":
-      return { ...base, status: "info", tag: "Workflow" };
+      return e.level === "critical"
+        ? { ...base, status: "emergency", tag: "Calling", event: "Emergency contact called" }
+        : { ...base, status: e.level === "warning" ? "watch" : "info", tag: "Workflow" };
     default:
       return { ...base, status: "info", tag: "Info" };
   }

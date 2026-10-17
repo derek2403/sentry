@@ -16,6 +16,12 @@ function bool(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
+function callMode(raw: string | undefined): "on" | "simulate" | "off" {
+  const value = raw?.trim().toLowerCase() || "off";
+  if (value === "on" || value === "simulate" || value === "off") return value;
+  throw new Error(`EMERGENCY_CALLS must be on, simulate or off, got "${raw}"`);
+}
+
 export const config = {
   llm: {
     // The vLLM server already running on the ATOM (OpenAI-compatible).
@@ -44,6 +50,18 @@ export const config = {
     recoverFrames: num("FALL_RECOVER_FRAMES", 2),
     minConfidence: num("FALL_MIN_CONFIDENCE", 0.5),
     candidateTimeoutS: num("FALL_CANDIDATE_TIMEOUT_S", 10),
+  },
+  calls: {
+    // What a confirmed fall does with Bryan's call service (python -m sentry_calls):
+    //   on       place a real call to EMERGENCY_CONTACT_PHONE
+    //   simulate print the call script only (no phone call)
+    //   off      do nothing
+    mode: callMode(process.env.EMERGENCY_CALLS),
+    // Seconds to wait before calling; pressing Mark OK in that time cancels the call.
+    delayS: num("EMERGENCY_CALL_DELAY_S", 0),
+    // Python with requirements-calls.txt installed. Defaults to .venv/bin/python, then python3.
+    python: process.env.CALLS_PYTHON || "",
+    timeoutMs: num("EMERGENCY_CALL_TIMEOUT_MS", 60_000),
   },
   cameraName: process.env.CAMERA_NAME || "Living room",
   // Runtime data (event log, snapshots): not part of the build output.

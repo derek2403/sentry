@@ -204,9 +204,10 @@ class Sentry {
       data: { t },
       message: `FALL DETECTED in ${source}: ${detail}`,
     });
-    this.alert = { eventId: entry.id, ts: entry.ts, location: source, camera, message: entry.message, snapshot, videoTime: t };
+    const alert: Alert = { eventId: entry.id, ts: entry.ts, location: source, camera, message: entry.message, snapshot, videoTime: t };
+    this.alert = alert;
     // Don't hold up the frame response while the workflow runs.
-    onFallConfirmed(this.alert, this.log).catch((err) => {
+    onFallConfirmed(alert, this.log, () => this.alert?.eventId === alert.eventId).catch((err) => {
       this.log.add({ kind: "error", level: "error", source, camera, message: `Emergency workflow failed: ${err instanceof Error ? err.message : String(err)}` });
     });
   }
