@@ -1,10 +1,16 @@
 # Sentry
 
-**Local AI that watches over your home.** Sentry turns the cameras you already own into an emergency-detection system. It spots falls, fires, leaks and dangerous situations for children, then sends the home's admin a Telegram message describing what is happening. All video analysis runs on-premises on a GIGABYTE AI TOP ATOM. No video or images ever leave the house, only a short text alert.
+**Sentry is a human-in-the-loop incident-response agent that turns your existing cameras into a local detect, verify and escalate pipeline.**
+
+- **Detect.** NVIDIA Nemotron, a vision-language model, analyses the camera feed frame by frame for emergencies such as an elderly person falling.
+- **Verify.** Sentry confirms an emergency only when several frames over a few seconds agree, so one bad frame doesn't raise a false alarm.
+- **Escalate.** As soon as a fall is confirmed, Sentry phones the household's emergency contact. A fall is urgent, so there is no text alert that might sit unread.
+
+People stay in control of every serious decision: Sentry only calls emergency services when the emergency contact says yes. All video analysis runs on-premises on a GIGABYTE AI TOP ATOM. No video or images ever leave the house, only a phone call.
 
 > Built for the **ACE 2026 · DGX Spark Mini Hackathon** — *Local AI, Real Problems*.
 >
-> **Status:** in active development during the hackathon. The dashboard and frame-by-frame fall detection are built. The Telegram alert and emergency call are next. See [Roadmap](#roadmap).
+> **Status:** in active development during the hackathon. The detect and verify stages are built: the dashboard and frame-by-frame fall detection. The escalate stage (the emergency call) is next. See [Roadmap](#roadmap).
 
 ---
 
@@ -21,7 +27,7 @@ Families are busier than ever, so more and more homes rely on CCTV to keep an ey
 
 ## What Sentry does
 
-Sentry connects to existing IP/RTSP or USB cameras, works out what is happening in each scene, and only sends an alert when something needs attention.
+Sentry connects to existing IP/RTSP or USB cameras, works out what is happening in each scene, and only calls someone when something needs attention.
 
 | Who / what   | Emergencies Sentry looks for                                                           | Scope   |
 | ------------ | -------------------------------------------------------------------------------------- | ------- |
@@ -31,22 +37,9 @@ Sentry connects to existing IP/RTSP or USB cameras, works out what is happening 
 | 🧒 Children   | Climbing furniture or windows, getting close to hazards (stove, balcony, pool)         | Stretch |
 | 🐾 Pets       | Pet in distress or in a dangerous area                                                 | Stretch |
 
-When Sentry confirms an emergency, it sends the admin a **text-only** Telegram message. There is no footage and no images, just:
-
-- **what happened, where, and how serious it is**, in plain language,
-- **action buttons** so the admin can respond straight from the chat.
-
-```text
-🚨 FALL DETECTED · Living room · Severity: HIGH
-An elderly person appears to have fallen beside the sofa and has not
-moved for about 20 seconds.
-[ ✅ They're OK ]   [ 📞 Call emergency contact ]
-⏱ No response in 3 minutes → Sentry will call your emergency contact.
-```
-
 ### Automatic emergency call
 
-If the admin doesn't reply or tap a button **within 3 minutes**, Sentry assumes nobody has seen the alert and **automatically phones the emergency contact**. The emergency contact is a person the household chose, such as a family member or neighbour. On the call, Sentry's voice agent (Nemotron, running on the ATOM):
+When Sentry confirms an emergency, it **phones the emergency contact straight away**. A fall is urgent, so Sentry doesn't send a text message that might sit unread. The emergency contact is a person the household chose, such as a family member or neighbour. On the call, Sentry's voice agent (Nemotron, running on the ATOM):
 
 1. **explains what happened**: what was detected, where, and when;
 2. **tells the contact what to do right now**, using a fixed first-aid checklist so it doesn't invent medical advice;
@@ -54,45 +47,37 @@ If the admin doesn't reply or tap a button **within 3 minutes**, Sentry assumes 
 
 ```mermaid
 flowchart LR
-    A["Emergency confirmed"] --> B["Telegram text alert<br/>to admin"]
-    B --> C{"Admin responds<br/>within 3 min?"}
-    C -->|"They're OK"| D["Close event<br/>logged as resolved"]
-    C -->|"Call emergency contact"| E["Call emergency contact<br/>explain + guide"]
-    C -->|"No response"| E
+    A["Emergency confirmed"] --> E["Call emergency contact<br/>explain + guide"]
     E --> G{"Call emergency<br/>services?"}
     G -->|"Yes"| H["Call emergency services<br/>with incident summary"]
-    G -->|"No"| F["Admin updated<br/>on Telegram"]
+    G -->|"No"| F["Answer logged<br/>on the dashboard"]
     H --> F
 ```
 
-- **They're OK**: the event is closed and no call is made.
-- **Call emergency contact**: the call is placed straight away, without waiting the 3 minutes.
-- **No response within 3 minutes**: the call is placed automatically. The admin is then told on Telegram that the emergency contact was called.
+If the contact says no, Sentry makes no second call. It logs the answer on the dashboard.
 
-Sentry only calls public emergency services (999) when the emergency contact confirms it on the call. It never does so on its own.
+**Human in the loop.** Sentry only calls public emergency services (999) when the emergency contact confirms it on the call. It never does so on its own.
 
 ## How it works
 
-Sentry is a **vision-language pipeline**, not a chatbot. It analyses the camera feed frame by frame with **NVIDIA Nemotron** running on the ATOM. Nemotron describes each frame and judges whether someone has fallen. Sentry's fall logic only confirms a fall when several frames over a few seconds agree, then starts the emergency workflow.
+Sentry is an **incident-response agent**, not a chatbot. It runs a three-stage vision-language pipeline on the ATOM: **detect**, **verify** and **escalate**. **NVIDIA Nemotron** describes each frame and detects whether someone has fallen. Sentry's fall logic verifies a fall only when several frames over a few seconds agree. Then the emergency workflow escalates to the people who can help.
 
 ```mermaid
 flowchart LR
     CAM["Dashboard<br/>camera or uploaded video"] -->|"one JPEG frame<br/>every 0.5 s"| API
 
     subgraph ATOM["GIGABYTE AI TOP ATOM · on-premises"]
-        API["Sentry server<br/>Next.js API routes"] -->|"frame + previous verdict"| NEM["Nemotron VLM<br/>local vLLM"]
-        NEM -->|"JSON verdict"| FALL["Fall logic<br/>confirm across frames"]
+        API["Sentry server<br/>Next.js API routes"] -->|"frame + previous verdict"| NEM["Detect<br/>Nemotron VLM · local vLLM"]
+        NEM -->|"JSON verdict"| FALL["Verify<br/>fall logic across frames"]
         FALL --> LOG[("Backlog<br/>event log + snapshots")]
-        FALL -->|"fall confirmed"| WF["Emergency workflow"]
+        FALL -->|"fall confirmed"| WF["Escalate<br/>emergency workflow"]
     end
 
-    WF -->|text alert only| TG["Telegram bot"]
-    TG -->|OK / call now| WF
-    WF -->|no response in 3 min| CALL["Emergency call<br/>to emergency contact"]
+    WF -->|"phone call only"| CALL["Emergency call<br/>to emergency contact"]
 ```
 
 1. **Sample.** The dashboard plays the camera feed or an uploaded video and grabs a frame every 0.5 s of video. Frames are sent one at a time: the next frame goes only after Nemotron has answered, so the model is never flooded.
-2. **Understand.** Each frame goes to Nemotron on the ATOM with a short instruction, plus the previous frame's verdict for context. Nemotron answers questions a simple motion or object detector can't, such as *"Is this person on the floor, or on a bed or sofa?"* and *"Did they fall, or are they lying down on purpose?"* Guided decoding makes it return a structured verdict:
+2. **Detect.** Each frame goes to Nemotron on the ATOM with a short instruction, plus the previous frame's verdict for context. Nemotron answers questions a simple motion or object detector can't, such as *"Is this person on the floor, or on a bed or sofa?"* and *"Did they fall, or are they lying down on purpose?"* Guided decoding makes it return a structured verdict:
 
    ```json
    {
@@ -105,24 +90,24 @@ flowchart LR
    }
    ```
 
-3. **Confirm.** A single frame can be wrong, so Sentry confirms a fall only when:
+3. **Verify.** A single frame can be wrong, so Sentry confirms a fall only when:
    - at least 2 frames, at least 2 s apart, show a fall;
    - and no clear "sitting up" or "standing" frame comes in between.
 
    If the video ends right after a fall, Sentry keeps checking the frozen last frame for a few seconds so the fall can still be confirmed.
-4. **Act.** A confirmed fall raises a **FALL DETECTED** alert on the dashboard with a snapshot, adds an entry to the Backlog and starts the emergency workflow (Telegram alert → 3-minute timer → emergency call). Every frame's verdict is logged too, so false alarms are easy to spot.
+4. **Escalate.** A confirmed fall raises a **FALL DETECTED** alert on the dashboard with a snapshot, adds an entry to the Backlog and starts the emergency workflow, which phones the emergency contact straight away. Every frame's verdict is logged too, so false alarms are easy to spot.
 
 ## Why it has to run locally
 
 The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it would not:
 
-- **Privacy by design.** Home cameras capture the most private spaces people have: bedrooms, children, elderly parents in vulnerable moments. With Sentry, video is analysed only on the ATOM and is never uploaded. No live footage, clips or snapshots are sent anywhere. The only things that leave the house are a short text alert to the admin's Telegram chat, such as *"Fall detected in the living room"*, and, if nobody responds, a spoken version of the same message on the emergency call. Cloud cameras upload footage around the clock, so this cuts what reaches third parties to a minimum, in line with the data-minimisation principle of Malaysia's PDPA 2010.
+- **Privacy by design.** Home cameras capture the most private spaces people have: bedrooms, children, elderly parents in vulnerable moments. With Sentry, video is analysed only on the ATOM and is never uploaded. No live footage, clips or snapshots are sent anywhere. The only thing that leaves the house is the emergency phone call, which speaks a short message such as *"A fall was detected in the living room"*. Cloud cameras upload footage around the clock, so this cuts what reaches third parties to a minimum, in line with the data-minimisation principle of Malaysia's PDPA 2010.
 - **Continuous analysis is only affordable locally.** Four cameras analysed at 2 frames a second produce **691,200 frames a day**. Sending each one to a cloud VLM would cost money per call and use upstream bandwidth all the time. On the ATOM, the running cost is effectively the electricity.
 - **Why the ATOM, not a Pi or a laptop.** The ATOM has 128 GB of unified memory, enough to run a capable vision-language model like Nemotron locally and analyse frames continuously. A small edge device can't run a VLM, and a laptop can't stay on 24/7 as a home appliance.
 - **Latency.** Inference happens on the same LAN as the cameras, with no upload round-trip.
 - **Uses the cameras people already own.** There are no new cameras to buy and no cloud subscription. One local AI box serves the whole home.
 
-> **Honest limitation:** detection keeps running if the internet drops, but Telegram delivery and the emergency call both need a connection. During an outage, events are logged locally and the alert is retried. A local alarm (speaker or LAN page) is on the roadmap.
+> **Honest limitation:** detection keeps running if the internet drops, but the emergency call needs a connection. During an outage, events are logged locally and the call is retried. A local alarm (speaker or LAN page) is on the roadmap.
 
 ## Tech stack
 
@@ -133,7 +118,6 @@ The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it 
 | App                   | Next.js 16 (App Router), TypeScript, Tailwind CSS: dashboard and API routes      |
 | Frame capture         | In the dashboard: `<video>` + canvas, for an uploaded video or a webcam          |
 | Storage               | Local event log (JSON lines) and fall snapshots in `data/` on the ATOM           |
-| Alerting *(next)*     | Telegram Bot API (long polling, so no public webhook is needed)                  |
 | Emergency calls *(next)* | Voice-call API (e.g. Twilio) with a text-to-speech message                    |
 
 > **Model notes**
@@ -234,7 +218,7 @@ components/             Dashboard UI (camera view, Nemotron panel, Backlog drawe
 lib/client/             useFrameAnalyzer: samples frames from the video and sends them
 lib/server/nemotron.ts  calls Nemotron on the local vLLM endpoint
 lib/server/fall.ts      turns per-frame verdicts into fall events
-lib/server/workflow.ts  emergency workflow hook (Telegram + call go here)
+lib/server/workflow.ts  emergency workflow hook (the emergency call goes here)
 scripts/mock-nemotron.mjs  fake endpoint for development
 tests/                  unit tests (vitest)
 ```
@@ -255,7 +239,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 
 | Metric                                         | Value |
 | ---------------------------------------------- | ----- |
-| End-to-end latency (event confirmed → Telegram) | _TBD_ |
+| End-to-end latency (event confirmed → phone rings) | _TBD_ |
 | VLM latency per verdict                        | _TBD_ |
 | Cameras handled at the same time               | _TBD_ |
 | Staged test clips: true alarms caught           | _TBD_ |
@@ -265,7 +249,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 
 | Criterion                | Weight | Where to look                                                                                       |
 | ------------------------ | :----: | --------------------------------------------------------------------------------------------------- |
-| AI capability            | 25%    | [How it works](#how-it-works): frame-by-frame Nemotron VLM analysis → multi-frame fall confirmation → Telegram alert → automatic emergency call |
+| AI capability            | 25%    | [How it works](#how-it-works): detect (frame-by-frame Nemotron VLM analysis) → verify (multi-frame fall confirmation) → escalate (an immediate call to the emergency contact), with a human in the loop |
 | Local AI on the ATOM     | 25%    | [Why it has to run locally](#why-it-has-to-run-locally); [demo.md](demo.md) step 6                    |
 | Impact & feasibility     | 20%    | [The problem](#the-problem): reuses existing cameras, no subscription, privacy-preserving           |
 | Technical implementation | 15%    | [Demo](#demo) and [Results](#results)                                                               |
@@ -276,9 +260,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 - [x] Dashboard with camera view, video upload and Backlog
 - [x] Frame-by-frame fall detection with Nemotron and structured verdicts
 - [x] Fall confirmation across frames, with every verdict and false alarm logged
-- [ ] Text-only Telegram alerts with action buttons
-- [ ] Acknowledgement tracking with a 3-minute timeout
-- [ ] Automatic emergency call to the emergency contact
+- [ ] Automatic emergency call to the emergency contact as soon as a fall is confirmed
 - [ ] Voice agent on the call: explain, guide from the first-aid checklist, offer to call emergency services
 - [ ] RTSP / IP camera ingestion on the ATOM (today: uploaded video or browser webcam)
 - [ ] Home profile in the prompt (for example, "Grandma naps on the sofa after lunch")
@@ -291,11 +273,11 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 ## Limitations & responsible use
 
 - Sentry **supports** human caregivers. It is **not** a certified safety or medical device, and it does not replace smoke detectors, emergency services or professional care.
-- Like any vision system, it can miss events (poor lighting, the person outside the camera's view) and can raise false alarms. Alerts describe what Sentry saw, so the admin can check in (for example by calling home or opening their existing CCTV app) and make the final call.
+- Like any vision system, it can miss events (poor lighting, the person outside the camera's view) and can raise false alarms. The call describes what Sentry saw, so the emergency contact can check in (for example by calling home or opening their existing CCTV app) and decide what to do.
 - **Consent.** Get consent from the adults being monitored, including elderly parents, and respect their right to refuse. Tell carers, domestic helpers and regular visitors. Don't put cameras in bathrooms.
-- **Data handling.** Sentry does not record continuously, and no footage or images are sent off the ATOM. Only frame verdicts and a snapshot of each confirmed fall are kept, locally in `data/` on the ATOM. Delete that folder to clear them (automatic retention is on the roadmap). Text alerts already delivered to Telegram must be deleted there separately.
-- **Emergency contact.** The emergency contact must agree to receive automatic calls. Keep their number up to date, because Sentry relies on it when the admin doesn't respond.
-- **Access control.** The bot sends alerts to, and accepts button presses from, an allow-list of chat IDs only. Use a private chat, or a small group with only the people who should see these alerts.
+- **Data handling.** Sentry does not record continuously, and no footage or images are sent off the ATOM. Only frame verdicts and a snapshot of each confirmed fall are kept, locally in `data/` on the ATOM. Delete that folder to clear them (automatic retention is on the roadmap).
+- **Emergency contact.** The emergency contact must agree to receive automatic calls. Keep their number up to date, because Sentry calls it as soon as a fall is confirmed.
+- **Access control.** Sentry only calls the phone numbers set in its configuration: the emergency contact and the emergency services number.
 
 ## Team
 
@@ -303,7 +285,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 | ---- | ---- |
 | _TBD_ | _ATOM / AI pipeline_ |
 | _TBD_ | _Computer vision_ |
-| _TBD_ | _Telegram & alerting_ |
+| _TBD_ | _Emergency call & voice agent_ |
 | _TBD_ | _Frontend / dashboard_ |
 | _TBD_ | _Testing, docs & pitch_ |
 
