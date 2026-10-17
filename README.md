@@ -40,10 +40,29 @@ When Sentry confirms an emergency, it sends the admin a **text-only** Telegram m
 🚨 FALL DETECTED · Living room · Severity: HIGH
 An elderly person appears to have fallen beside the sofa and has not
 moved for about 20 seconds.
-[ ✅ They're OK ]   [ 🔔 Escalate ]
+[ ✅ They're OK ]   [ 📞 Call emergency contact ]
+⏱ No response in 3 minutes → Sentry will call your emergency contact.
 ```
 
-**Escalate**, or no acknowledgement within a set timeout, sends the alert to the next contact on the list. Sentry does **not** contact emergency services itself.
+### Automatic emergency call
+
+If the admin doesn't reply or tap a button **within 3 minutes**, Sentry assumes nobody has seen the alert and **automatically phones the emergency contact**. The emergency contact is a person the household chose, such as a family member or neighbour. On the call, a text-to-speech voice reads out what happened, where, and when.
+
+```mermaid
+flowchart LR
+    A["Emergency confirmed"] --> B["Telegram text alert<br/>to admin"]
+    B --> C{"Admin responds<br/>within 3 min?"}
+    C -->|"They're OK"| D["Close event<br/>logged as resolved"]
+    C -->|"Call emergency contact"| E["Emergency call<br/>to emergency contact"]
+    C -->|"No response"| E
+    E --> F["Admin notified that<br/>the call was made"]
+```
+
+- **They're OK**: the event is closed and no call is made.
+- **Call emergency contact**: the call is placed straight away, without waiting the 3 minutes.
+- **No response within 3 minutes**: the call is placed automatically. The admin is then told on Telegram that the emergency contact was called.
+
+Sentry calls the household's chosen emergency contact. It does **not** dial public emergency services (999) itself.
 
 ## How it works
 
@@ -57,12 +76,13 @@ flowchart LR
         SAMPLE["Frame sampler<br/>motion gating"] --> FAST["Fast vision models<br/>person · pose · fire/smoke"]
         FAST -->|candidate event| VLM["Local VLM<br/>scene reasoning + severity"]
         CTX[("Home profile")] -.-> VLM
-        VLM -->|structured verdict| MGR["Alert manager<br/>dedupe · cooldown · escalation"]
+        VLM -->|structured verdict| MGR["Alert manager<br/>dedupe · cooldown · 3-min timer"]
         MGR --> LOG[("Event log")]
     end
 
     MGR -->|text alert only| TG["Telegram bot"]
-    TG -->|acknowledge / escalate| MGR
+    TG -->|OK / call now| MGR
+    MGR -->|no response in 3 min| CALL["Emergency call<br/>to emergency contact"]
 ```
 
 1. **Capture.** Frames are pulled from each camera stream and sampled at a low rate (about 1 fps). Motion gating skips frames where nothing has changed.
@@ -84,7 +104,7 @@ flowchart LR
    }
    ```
 
-4. **Act.** The alert manager removes duplicate alerts, applies a cooldown, sends the Telegram alert, tracks whether anyone acknowledges it, and escalates if nobody responds. Rejected candidates are logged too, which lets us measure false alarms.
+4. **Act.** The alert manager removes duplicate alerts, applies a cooldown, sends the Telegram alert, and starts a 3-minute timer. If the admin doesn't respond in time, it places an automatic call to the emergency contact. Rejected candidates are logged too, which lets us measure false alarms.
 
 **Why two stages?** Running a VLM on every frame from every camera, 24/7, would waste compute and add latency. A VLM is also much better than a detector at telling a real emergency from an everyday look-alike, like someone lying on the sofa or bending to pick something up. Screening first and reasoning second keeps Sentry fast and cuts down false alarms.
 
@@ -92,13 +112,13 @@ flowchart LR
 
 The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it would not:
 
-- **Privacy by design.** Home cameras capture the most private spaces people have: bedrooms, children, elderly parents in vulnerable moments. With Sentry, video is analysed only on the ATOM and is never uploaded. No live footage, clips or snapshots are sent anywhere. The only thing that leaves the house is a short text alert to the admin's Telegram chat, such as *"Fall detected in the living room"*. Cloud cameras upload footage around the clock, so this cuts what reaches third parties to a minimum, in line with the data-minimisation principle of Malaysia's PDPA 2010.
+- **Privacy by design.** Home cameras capture the most private spaces people have: bedrooms, children, elderly parents in vulnerable moments. With Sentry, video is analysed only on the ATOM and is never uploaded. No live footage, clips or snapshots are sent anywhere. The only things that leave the house are a short text alert to the admin's Telegram chat, such as *"Fall detected in the living room"*, and, if nobody responds, a spoken version of the same message on the emergency call. Cloud cameras upload footage around the clock, so this cuts what reaches third parties to a minimum, in line with the data-minimisation principle of Malaysia's PDPA 2010.
 - **Continuous analysis is only affordable locally.** Four cameras at 1 fps produce **345,600 frames a day**. Even after gating, sending candidates to a cloud VLM would cost money per call and use upstream bandwidth all the time. On the ATOM, the running cost is effectively the electricity.
 - **Why the ATOM, not a Pi or a laptop.** The ATOM has 128 GB of unified memory. That's enough to keep the VLM, the detection and pose models, and several camera streams loaded at the same time. A small edge device can run a detector but not a capable VLM. A laptop can't stay on 24/7 as a home appliance.
 - **Latency.** Inference happens on the same LAN as the cameras, with no upload round-trip.
 - **Uses the cameras people already own.** There are no new cameras to buy and no cloud subscription. One local AI box serves the whole home.
 
-> **Honest limitation:** detection keeps running if the internet drops, but Telegram delivery needs a connection. During an outage, events are logged locally and the alert is retried. A local alarm (speaker or LAN page) is on the roadmap.
+> **Honest limitation:** detection keeps running if the internet drops, but Telegram delivery and the emergency call both need a connection. During an outage, events are logged locally and the alert is retried. A local alarm (speaker or LAN page) is on the roadmap.
 
 ## Tech stack
 
@@ -108,6 +128,7 @@ The hackathon asks *"would this run the same without the ATOM?"* For Sentry, it 
 | LLM / VLM serving | vLLM: the OpenAI-compatible endpoint already configured on the ATOM          |
 | Computer vision   | OpenCV for stream capture, plus lightweight person/pose and fire/smoke models |
 | Alerting          | Telegram Bot API (long polling, so no public webhook is needed)             |
+| Emergency calls   | Voice-call API (e.g. Twilio) with a text-to-speech message                  |
 | Language          | Python                                                                      |
 
 > **Model notes**
@@ -150,9 +171,14 @@ LLM_API_KEY=                     # leave blank if the endpoint has no key
 
 # Telegram
 TELEGRAM_BOT_TOKEN=<your-bot-token>
-TELEGRAM_CHAT_ID=<primary-chat-id>
-TELEGRAM_ESCALATION_CHAT_IDS=<id2>,<id3>   # notified in order if unacknowledged
-ESCALATION_TIMEOUT_SECONDS=120
+TELEGRAM_CHAT_ID=<admin-chat-id>
+
+# Automatic emergency call
+ACK_TIMEOUT_SECONDS=180                       # call the emergency contact if the admin doesn't respond within 3 minutes
+EMERGENCY_CONTACT_PHONE=<+60XXXXXXXXX>
+VOICE_API_SID=<voice-provider-account-id>
+VOICE_API_TOKEN=<voice-provider-token>
+VOICE_FROM_NUMBER=<caller-id-number>
 
 # Cameras: comma-separated "name=source" pairs (RTSP URL, device index, or video file).
 # RTSP URLs often contain the camera's username/password, so keep them only in .env.
@@ -187,7 +213,7 @@ Our 5-minute demo runs the complete workflow end to end on the ATOM:
 2. **True alarm:** a team member acts out a fall. The fast models flag it, the local VLM confirms it, and a text alert describing the fall arrives on the admin's phone through Telegram.
 3. **False alarm caught:** a team member lies down on a couch or bends to pick something up. The detector flags it, the VLM rejects it, and no alert is sent. The rejected verdict appears in the event log.
 4. **Fire:** a synthetic or approved stock clip is played as a camera source. We don't stage real fires.
-5. We tap **Escalate**, show the alert reaching the second contact, then tap **They're OK**.
+5. **No response:** we leave the alert unanswered. After the timeout (shortened from 3 minutes for the demo), Sentry automatically calls a team member's phone, acting as the emergency contact, and reads out the alert.
 6. Throughout, `nvidia-smi` and the vLLM request log on the ATOM are on screen, to prove inference is local.
 
 All demo footage is staged by the team or synthetic. Any third-party clips are used only with organiser approval and a compatible licence. No real household footage is used.
@@ -208,11 +234,11 @@ All demo footage is staged by the team or synthetic. Any third-party clips are u
 
 | Criterion                | Weight | Where to look                                                                                       |
 | ------------------------ | :----: | --------------------------------------------------------------------------------------------------- |
-| AI capability            | 25%    | [How it works](#how-it-works): CV screening → VLM reasoning with home context → alerting and escalation |
+| AI capability            | 25%    | [How it works](#how-it-works): CV screening → VLM reasoning with home context → Telegram alert → automatic emergency call |
 | Local AI on the ATOM     | 25%    | [Why it has to run locally](#why-it-has-to-run-locally); demo step 6                                |
 | Impact & feasibility     | 20%    | [The problem](#the-problem): reuses existing cameras, no subscription, privacy-preserving           |
 | Technical implementation | 15%    | [Demo](#demo) and [Results](#results)                                                               |
-| Pitch & demo             | 15%    | Live demo of a true alarm, a rejected false alarm and escalation                                    |
+| Pitch & demo             | 15%    | Live demo of a true alarm, a rejected false alarm and the automatic emergency call                  |
 
 ## Roadmap
 
@@ -220,7 +246,8 @@ All demo footage is staged by the team or synthetic. Any third-party clips are u
 - [ ] Fall detection (person + pose) and fire/smoke screening
 - [ ] VLM verification with structured verdicts and home profile
 - [ ] Text-only Telegram alerts with action buttons
-- [ ] Acknowledgement tracking and escalation
+- [ ] Acknowledgement tracking with a 3-minute timeout
+- [ ] Automatic emergency call to the emergency contact
 - [ ] Event log with rejected candidates
 - [ ] Water leak and child-safety scenarios
 - [ ] Local alarm when the internet is down
@@ -234,6 +261,7 @@ All demo footage is staged by the team or synthetic. Any third-party clips are u
 - Like any vision system, it can miss events (poor lighting, the person outside the camera's view) and can raise false alarms. Alerts describe what Sentry saw, so the admin can check in (for example by calling home or opening their existing CCTV app) and make the final call.
 - **Consent.** Get consent from the adults being monitored, including elderly parents, and respect their right to refuse. Tell carers, domestic helpers and regular visitors. Don't put cameras in bathrooms.
 - **Data handling.** Sentry does not record continuously, and no footage or images are sent off the ATOM. Only event verdicts are kept in the local event log, and they are deleted after `RETENTION_DAYS`. Text alerts already delivered to Telegram must be deleted there separately.
+- **Emergency contact.** The emergency contact must agree to receive automatic calls. Keep their number up to date, because Sentry relies on it when the admin doesn't respond.
 - **Access control.** The bot sends alerts to, and accepts button presses from, an allow-list of chat IDs only. Use a private chat, or a small group with only the people who should see these alerts.
 
 ## Team
