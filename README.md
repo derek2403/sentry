@@ -1,10 +1,16 @@
 # Sentry
 
-**Local AI that watches over your home.** Sentry turns the cameras you already own into an emergency-detection system. It spots falls, fires, leaks and dangerous situations for children, then sends the home's admin a Telegram message describing what is happening. All video analysis runs on-premises on a GIGABYTE AI TOP ATOM. No video or images ever leave the house, only a short text alert.
+**Sentry is a human-in-the-loop incident-response agent that turns your existing cameras into a local detect, verify and escalate pipeline.**
+
+- **Detect.** NVIDIA Nemotron, a vision-language model, analyses the camera feed frame by frame for emergencies such as an elderly person falling.
+- **Verify.** Sentry confirms an emergency only when several frames over a few seconds agree, so one bad frame doesn't raise a false alarm.
+- **Escalate.** Sentry sends the home's admin a text-only Telegram alert. If nobody responds within 3 minutes, it phones the household's emergency contact.
+
+People stay in control of every serious decision: Sentry only calls emergency services when the emergency contact says yes. All video analysis runs on-premises on a GIGABYTE AI TOP ATOM. No video or images ever leave the house, only a short text alert and, if needed, a phone call.
 
 > Built for the **ACE 2026 · DGX Spark Mini Hackathon** — *Local AI, Real Problems*.
 >
-> **Status:** in active development during the hackathon. The dashboard and frame-by-frame fall detection are built. The Telegram alert and emergency call are next. See [Roadmap](#roadmap).
+> **Status:** in active development during the hackathon. The detect and verify stages are built: the dashboard and frame-by-frame fall detection. The escalate stage (Telegram alert and emergency call) is next. See [Roadmap](#roadmap).
 
 ---
 
@@ -69,21 +75,21 @@ flowchart LR
 - **Call emergency contact**: the call is placed straight away, without waiting the 3 minutes.
 - **No response within 3 minutes**: the call is placed automatically. The admin is then told on Telegram that the emergency contact was called.
 
-Sentry only calls public emergency services (999) when the emergency contact confirms it on the call. It never does so on its own.
+**Human in the loop.** Sentry only calls public emergency services (999) when the emergency contact confirms it on the call. It never does so on its own.
 
 ## How it works
 
-Sentry is a **vision-language pipeline**, not a chatbot. It analyses the camera feed frame by frame with **NVIDIA Nemotron** running on the ATOM. Nemotron describes each frame and judges whether someone has fallen. Sentry's fall logic only confirms a fall when several frames over a few seconds agree, then starts the emergency workflow.
+Sentry is an **incident-response agent**, not a chatbot. It runs a three-stage vision-language pipeline on the ATOM: **detect**, **verify** and **escalate**. **NVIDIA Nemotron** describes each frame and detects whether someone has fallen. Sentry's fall logic verifies a fall only when several frames over a few seconds agree. Then the emergency workflow escalates to the people who can help.
 
 ```mermaid
 flowchart LR
     CAM["Dashboard<br/>camera or uploaded video"] -->|"one JPEG frame<br/>every 0.5 s"| API
 
     subgraph ATOM["GIGABYTE AI TOP ATOM · on-premises"]
-        API["Sentry server<br/>Next.js API routes"] -->|"frame + previous verdict"| NEM["Nemotron VLM<br/>local vLLM"]
-        NEM -->|"JSON verdict"| FALL["Fall logic<br/>confirm across frames"]
+        API["Sentry server<br/>Next.js API routes"] -->|"frame + previous verdict"| NEM["Detect<br/>Nemotron VLM · local vLLM"]
+        NEM -->|"JSON verdict"| FALL["Verify<br/>fall logic across frames"]
         FALL --> LOG[("Backlog<br/>event log + snapshots")]
-        FALL -->|"fall confirmed"| WF["Emergency workflow"]
+        FALL -->|"fall confirmed"| WF["Escalate<br/>emergency workflow"]
     end
 
     WF -->|text alert only| TG["Telegram bot"]
@@ -92,7 +98,7 @@ flowchart LR
 ```
 
 1. **Sample.** The dashboard plays the camera feed or an uploaded video and grabs a frame every 0.5 s of video. Frames are sent one at a time: the next frame goes only after Nemotron has answered, so the model is never flooded.
-2. **Understand.** Each frame goes to Nemotron on the ATOM with a short instruction, plus the previous frame's verdict for context. Nemotron answers questions a simple motion or object detector can't, such as *"Is this person on the floor, or on a bed or sofa?"* and *"Did they fall, or are they lying down on purpose?"* Guided decoding makes it return a structured verdict:
+2. **Detect.** Each frame goes to Nemotron on the ATOM with a short instruction, plus the previous frame's verdict for context. Nemotron answers questions a simple motion or object detector can't, such as *"Is this person on the floor, or on a bed or sofa?"* and *"Did they fall, or are they lying down on purpose?"* Guided decoding makes it return a structured verdict:
 
    ```json
    {
@@ -105,12 +111,12 @@ flowchart LR
    }
    ```
 
-3. **Confirm.** A single frame can be wrong, so Sentry confirms a fall only when:
+3. **Verify.** A single frame can be wrong, so Sentry confirms a fall only when:
    - at least 2 frames, at least 2 s apart, show a fall;
    - and no clear "sitting up" or "standing" frame comes in between.
 
    If the video ends right after a fall, Sentry keeps checking the frozen last frame for a few seconds so the fall can still be confirmed.
-4. **Act.** A confirmed fall raises a **FALL DETECTED** alert on the dashboard with a snapshot, adds an entry to the Backlog and starts the emergency workflow (Telegram alert → 3-minute timer → emergency call). Every frame's verdict is logged too, so false alarms are easy to spot.
+4. **Escalate.** A confirmed fall raises a **FALL DETECTED** alert on the dashboard with a snapshot, adds an entry to the Backlog and starts the emergency workflow (Telegram alert → 3-minute timer → emergency call). Every frame's verdict is logged too, so false alarms are easy to spot.
 
 ## Why it has to run locally
 
@@ -265,7 +271,7 @@ During the demo, the "emergency contact" and "emergency services" are both teamm
 
 | Criterion                | Weight | Where to look                                                                                       |
 | ------------------------ | :----: | --------------------------------------------------------------------------------------------------- |
-| AI capability            | 25%    | [How it works](#how-it-works): frame-by-frame Nemotron VLM analysis → multi-frame fall confirmation → Telegram alert → automatic emergency call |
+| AI capability            | 25%    | [How it works](#how-it-works): detect (frame-by-frame Nemotron VLM analysis) → verify (multi-frame fall confirmation) → escalate (Telegram alert → automatic emergency call), with a human in the loop |
 | Local AI on the ATOM     | 25%    | [Why it has to run locally](#why-it-has-to-run-locally); [demo.md](demo.md) step 6                    |
 | Impact & feasibility     | 20%    | [The problem](#the-problem): reuses existing cameras, no subscription, privacy-preserving           |
 | Technical implementation | 15%    | [Demo](#demo) and [Results](#results)                                                               |
